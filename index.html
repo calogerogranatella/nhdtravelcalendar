@@ -1,0 +1,779 @@
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
+import { getFirestore, collection, query, onSnapshot, addDoc, setDoc, doc, Timestamp, where, getDocs, writeBatch, updateDoc } from 'firebase/firestore';
+
+// --- Constants ---
+const STATUS_OPTIONS = ["NEOM", "VAC", "REM", "BT/PD", "MED", "NEOM/T", "T/NEOM", ""];
+const LEGEND_DEFINITIONS = {
+    "NEOM": "In NEOM",
+    "VAC": "On Vacation",
+    "REM": "Working Remotely",
+    "BT/PD": "Business Travel or Personal Development",
+    "MED": "Medical Leave",
+    "NEOM/T": "Traveling after 12 PM",
+    "T/NEOM": "Arriving before 12 PM",
+    "WKND": "Weekend"
+};
+const LEGEND_ORDER = ["NEOM", "BT/PD", "MED", "VAC", "NEOM/T", "WKND", "REM", "T/NEOM"];
+const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const YEARS = [2025, 2026];
+
+
+// --- Date Helper Functions ---
+const getStartOfWeek = (date = new Date()) => {
+    const d = new Date(date);
+    const day = d.getDay(); // Sunday is 0, Monday is 1, etc.
+    const diff = d.getDate() - day; // Subtract the day number to get to Sunday
+    return new Date(d.setDate(diff));
+};
+
+const getWeekDays = (startDate) => {
+    const dates = [];
+    const start = new Date(startDate);
+    for (let i = 0; i < 7; i++) {
+        const nextDate = new Date(start);
+        nextDate.setDate(start.getDate() + i);
+        dates.push(nextDate);
+    }
+    return dates;
+};
+
+const formatWeekHeader = (weekDays) => {
+    const start = weekDays[0];
+    const end = weekDays[6];
+    const startMonth = start.toLocaleString('en-US', { month: 'short' });
+    const endMonth = end.toLocaleString('en-US', { month: 'short' });
+
+    if (start.getFullYear() !== end.getFullYear()) {
+        return `${start.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} - ${end.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+    }
+    if (startMonth === endMonth) {
+        return `${startMonth} ${start.getDate()} - ${end.getDate()}, ${start.getFullYear()}`;
+    }
+    return `${startMonth} ${start.getDate()} - ${endMonth} ${end.getDate()}, ${start.getFullYear()}`;
+};
+
+// --- Styling Helper Function ---
+const getStatusColorClass = (status) => {
+    switch (status) {
+        case 'REM':
+        case 'VAC':
+        case 'MED':
+            return 'bg-blue-200';
+        case 'BT/PD':
+            return 'bg-green-200';
+        case 'NEOM/T':
+            return 'bg-gradient-to-r from-white to-blue-200';
+        case 'T/NEOM':
+            return 'bg-gradient-to-r from-blue-200 to-white';
+        case 'WKND':
+             return 'bg-gray-200';
+        default:
+            return 'bg-white';
+    }
+};
+
+
+// --- Helper Components ---
+const ConfirmationModal = ({ message, onConfirm, onCancel }) => (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50">
+        <div className="bg-white p-6 rounded-xl shadow-2xl w-full max-w-sm mx-4">
+            <p className="text-lg text-gray-800 mb-6">{message}</p>
+            <div className="flex justify-end space-x-4">
+                <button onClick={onCancel} className="px-6 py-2 rounded-lg bg-gray-200 text-gray-700 hover:bg-gray-300 transition">Cancel</button>
+                <button onClick={onConfirm} className="px-6 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700 transition">Confirm</button>
+            </div>
+        </div>
+    </div>
+);
+
+const LoadingSpinner = ({ text }) => (
+    <div className="min-h-screen bg-gray-100 flex flex-col items-center justify-center">
+        <div className="flex items-center space-x-2">
+            <div className="w-4 h-4 rounded-full animate-pulse bg-indigo-500"></div>
+            <div className="w-4 h-4 rounded-full animate-pulse bg-indigo-500" style={{ animationDelay: '0.2s' }}></div>
+            <div className="w-4 h-4 rounded-full animate-pulse bg-indigo-500" style={{ animationDelay: '0.4s' }}></div>
+        </div>
+        <span className="text-gray-700 mt-4">{text}</span>
+    </div>
+);
+
+const ErrorDisplay = ({ error }) => (
+     <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4">
+        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg relative" role="alert">
+            <strong className="font-bold">Error!</strong>
+            <span className="block sm:inline ml-2">{error}</span>
+        </div>
+    </div>
+);
+
+// --- Main App Component ---
+function App() {
+    // Firebase and Auth states
+    const [db, setDb] = useState(null);
+    const [userId, setUserId] = useState(null);
+    const [isAuthReady, setIsAuthReady] = useState(false);
+    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+    // Data states
+    const [departments, setDepartments] = useState([]);
+    const [employees, setEmployees] = useState([]);
+    const [weeklyStatuses, setWeeklyStatuses] = useState({});
+    const [yearlyData, setYearlyData] = useState({});
+
+    // UI states
+    const [currentDate, setCurrentDate] = useState(new Date());
+    const [newDepartmentName, setNewDepartmentName] = useState('');
+    const [newEmployeeInputs, setNewEmployeeInputs] = useState({});
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
+    const [message, setMessage] = useState('');
+    const [isDateSelectorVisible, setIsDateSelectorVisible] = useState(true);
+    const [isAddDeptVisible, setIsAddDeptVisible] = useState(true);
+    const [view, setView] = useState('weekly'); // 'weekly' or 'yearly'
+    const [yearlyViewYear, setYearlyViewYear] = useState(new Date().getFullYear());
+    
+    // State for modals and editing
+    const [employeeToDelete, setEmployeeToDelete] = useState(null);
+    const [departmentToDelete, setDepartmentToDelete] = useState(null);
+    const [editingDepartment, setEditingDepartment] = useState({ id: null, name: '' });
+    const [editingEmployee, setEditingEmployee] = useState({ id: null, name: '' });
+
+    // State for native drag-and-drop
+    const [draggingEmployeeId, setDraggingEmployeeId] = useState(null);
+    const [dragOverDeptId, setDragOverDeptId] = useState(null);
+    const [dragOverEmployeeId, setDragOverEmployeeId] = useState(null);
+
+
+    // --- Utility Functions ---
+    const showMessage = (msg) => {
+        setMessage(msg);
+        setTimeout(() => setMessage(''), 3000);
+    };
+
+    // --- Firebase Initialization and Auth ---
+    useEffect(() => {
+        try {
+            const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+            const app = initializeApp(firebaseConfig);
+            const firestore = getFirestore(app);
+            const firebaseAuth = getAuth(app);
+            setDb(firestore);
+
+            const authSub = onAuthStateChanged(firebaseAuth, async (user) => {
+                if (user) {
+                    setUserId(user.uid);
+                } else {
+                    try {
+                        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                            await signInWithCustomToken(firebaseAuth, __initial_auth_token);
+                        } else {
+                            await signInAnonymously(firebaseAuth);
+                        }
+                    } catch (authError) { console.error("Firebase sign-in error:", authError); setError("Failed to authenticate."); }
+                }
+                setIsAuthReady(true);
+            });
+            return () => authSub();
+        } catch (e) { console.error("Firebase initialization error:", e); setError("Failed to initialize Firebase."); setLoading(false); }
+    }, []);
+
+    // --- Data Fetching from Firestore ---
+    useEffect(() => {
+        if (!db || !isAuthReady) return;
+
+        setLoading(true);
+        const deptsRef = collection(db, `artifacts/${appId}/public/data/departments`);
+        const unsubscribeDepts = onSnapshot(deptsRef, (snapshot) => {
+            setDepartments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+            setLoading(false);
+        }, (err) => { console.error(err); setError("Failed to load departments."); setLoading(false); });
+
+        const employeesRef = collection(db, `artifacts/${appId}/public/data/employees`);
+        const q = query(employeesRef);
+        const unsubscribeEmployees = onSnapshot(q, (snapshot) => {
+            const fetchedEmployees = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            fetchedEmployees.sort((a, b) => (a.order || 0) - (b.order || 0) || a.createdAt.toMillis() - b.createdAt.toMillis());
+            setEmployees(fetchedEmployees);
+        }, (err) => { console.error(err); setError("Failed to load employees."); });
+
+        return () => { unsubscribeDepts(); unsubscribeEmployees(); };
+    }, [db, isAuthReady, appId]);
+
+    // Fetch weekly status data
+    useEffect(() => {
+        if (!db || !isAuthReady || view !== 'weekly') return;
+
+        const weekDays = getWeekDays(getStartOfWeek(currentDate));
+        const monthYearsToQuery = [...new Set(weekDays.map(d => `${d.getFullYear()}-${(d.getMonth() + 1).toString().padStart(2, '0')}`))]
+
+        const statusesRef = collection(db, `artifacts/${appId}/public/data/monthly_statuses`);
+        const q = query(statusesRef, where("monthYear", "in", monthYearsToQuery));
+
+        const unsubscribeStatuses = onSnapshot(q, (snapshot) => {
+            const newStatuses = {};
+            snapshot.docs.forEach(doc => {
+                newStatuses[doc.id] = { ...doc.data() };
+            });
+            setWeeklyStatuses(newStatuses);
+        }, (err) => { console.error(err); setError("Failed to load weekly status data."); });
+
+        return () => unsubscribeStatuses();
+    }, [db, isAuthReady, currentDate, view, appId]);
+
+    // Fetch yearly status data
+    useEffect(() => {
+        if (!db || !isAuthReady || view !== 'yearly') return;
+        setLoading(true);
+
+        const monthYearsToQuery = MONTH_NAMES.map((_, index) => `${yearlyViewYear}-${(index + 1).toString().padStart(2, '0')}`);
+        
+        const statusesRef = collection(db, `artifacts/${appId}/public/data/monthly_statuses`);
+        const q = query(statusesRef, where("monthYear", "in", monthYearsToQuery));
+
+        const unsubscribeYearly = onSnapshot(q, (snapshot) => {
+            const newYearlyData = {};
+            snapshot.docs.forEach(doc => {
+                const data = doc.data();
+                if (!newYearlyData[data.employeeId]) {
+                    newYearlyData[data.employeeId] = {};
+                }
+                newYearlyData[data.employeeId][data.monthYear] = data.dailyStatus;
+            });
+            setYearlyData(newYearlyData);
+            setLoading(false);
+        }, (err) => { console.error(err); setError("Failed to load yearly data."); setLoading(false); });
+
+        return () => unsubscribeYearly();
+    }, [db, isAuthReady, view, yearlyViewYear, appId]);
+
+
+    // --- Data Manipulation Handlers ---
+    const handleAddDepartment = async () => {
+        if (!newDepartmentName.trim() || !db || !userId) return;
+        try {
+            await addDoc(collection(db, `artifacts/${appId}/public/data/departments`), { name: newDepartmentName.trim(), createdAt: Timestamp.now(), createdBy: userId });
+            setNewDepartmentName('');
+            showMessage("Department added!");
+        } catch (e) { console.error(e); setError("Failed to add department."); }
+    };
+
+    const handleUpdateDepartment = async () => {
+        if (!editingDepartment.id || !editingDepartment.name.trim()) return;
+        try {
+            const deptRef = doc(db, `artifacts/${appId}/public/data/departments`, editingDepartment.id);
+            await updateDoc(deptRef, { name: editingDepartment.name.trim() });
+            setEditingDepartment({ id: null, name: '' });
+            showMessage("Department updated!");
+        } catch (e) { console.error(e); setError("Failed to update department."); }
+    };
+
+    const handleDeleteDepartment = async (departmentId) => {
+        if (!departmentId || !db) return;
+        setLoading(true);
+        try {
+            const batch = writeBatch(db);
+            
+            const employeesToDelete = employees.filter(emp => emp.departmentId === departmentId);
+            const employeeIdsToDelete = employeesToDelete.map(emp => emp.id);
+
+            const deptRef = doc(db, `artifacts/${appId}/public/data/departments`, departmentId);
+            batch.delete(deptRef);
+
+            if (employeeIdsToDelete.length > 0) {
+                employeeIdsToDelete.forEach(empId => {
+                    const empRef = doc(db, `artifacts/${appId}/public/data/employees`, empId);
+                    batch.delete(empRef);
+                });
+
+                const statusesRef = collection(db, `artifacts/${appId}/public/data/monthly_statuses`);
+                const q = query(statusesRef, where("employeeId", "in", employeeIdsToDelete));
+                const statusDocs = await getDocs(q);
+                statusDocs.forEach(doc => batch.delete(doc.ref));
+            }
+
+            await batch.commit();
+            showMessage("Department and all its employees deleted.");
+        } catch (e) { console.error(e); setError("Failed to delete department.");
+        } finally { setDepartmentToDelete(null); setLoading(false); }
+    };
+
+    const handleAddEmployee = async (departmentId) => {
+        const employeeName = newEmployeeInputs[departmentId]?.trim();
+        if (!employeeName || !db || !userId) return;
+        const deptEmployees = employees.filter(emp => emp.departmentId === departmentId);
+        const maxOrder = deptEmployees.reduce((max, emp) => Math.max(max, emp.order || 0), 0);
+        try {
+            await addDoc(collection(db, `artifacts/${appId}/public/data/employees`), { 
+                departmentId, 
+                name: employeeName, 
+                order: maxOrder + 1,
+                createdAt: Timestamp.now(), 
+                createdBy: userId 
+            });
+            setNewEmployeeInputs(prev => ({ ...prev, [departmentId]: '' }));
+            showMessage("Employee added!");
+        } catch (e) { console.error(e); setError("Failed to add employee."); }
+    };
+
+    const handleUpdateEmployee = async () => {
+        if (!editingEmployee.id || !editingEmployee.name.trim()) return;
+        try {
+            const empRef = doc(db, `artifacts/${appId}/public/data/employees`, editingEmployee.id);
+            await updateDoc(empRef, { name: editingEmployee.name.trim() });
+            setEditingEmployee({ id: null, name: '' });
+            showMessage("Employee updated!");
+        } catch (e) { console.error(e); setError("Failed to update employee."); }
+    };
+
+    const handleDeleteEmployee = async (employeeId) => {
+        if (!employeeId || !db) return;
+        setLoading(true);
+        try {
+            const batch = writeBatch(db);
+            const employeeRef = doc(db, `artifacts/${appId}/public/data/employees`, employeeId);
+            batch.delete(employeeRef);
+            const statusesRef = collection(db, `artifacts/${appId}/public/data/monthly_statuses`);
+            const q = query(statusesRef, where("employeeId", "==", employeeId));
+            const statusDocs = await getDocs(q);
+            statusDocs.forEach(doc => batch.delete(doc.ref));
+            await batch.commit();
+            showMessage("Employee deleted.");
+        } catch (e) { console.error(e); setError("Failed to delete employee.");
+        } finally { setEmployeeToDelete(null); setLoading(false); }
+    };
+
+    const handleStatusChange = useCallback(async (employeeId, date, newStatus) => {
+        if (!db) return;
+        const monthYear = `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}`;
+        const day = date.getDate().toString();
+        
+        const statusDocEntry = Object.entries(weeklyStatuses).find(([_, data]) => data.employeeId === employeeId && data.monthYear === monthYear);
+
+        try {
+            if (statusDocEntry) {
+                const [statusDocId] = statusDocEntry;
+                const statusRef = doc(db, `artifacts/${appId}/public/data/monthly_statuses`, statusDocId);
+                await setDoc(statusRef, { dailyStatus: { [day]: newStatus }, updatedAt: Timestamp.now() }, { merge: true });
+            } else {
+                await addDoc(collection(db, `artifacts/${appId}/public/data/monthly_statuses`), { employeeId, monthYear, dailyStatus: { [day]: newStatus }, createdAt: Timestamp.now(), updatedAt: Timestamp.now() });
+            }
+        } catch (e) { console.error(e); setError("Failed to update status."); }
+    }, [db, weeklyStatuses, appId]);
+
+    // --- Drag and Drop Handlers ---
+    const handleDragStart = (e, employeeId) => {
+        setDraggingEmployeeId(employeeId);
+    };
+    
+    const handleDragOver = (e, employeeId) => {
+        e.preventDefault();
+        if (employeeId !== dragOverEmployeeId) {
+            setDragOverEmployeeId(employeeId);
+        }
+    };
+
+    const handleDrop = async (e, targetDepartmentId, targetEmployeeId) => {
+        e.preventDefault();
+        const draggedEmployee = employees.find(emp => emp.id === draggingEmployeeId);
+        if (!draggedEmployee) return;
+
+        if (draggedEmployee.departmentId !== targetDepartmentId) {
+            try {
+                const employeeRef = doc(db, `artifacts/${appId}/public/data/employees`, draggingEmployeeId);
+                await updateDoc(employeeRef, { departmentId: targetDepartmentId });
+                showMessage("Employee moved!");
+            } catch(err) { console.error("Error moving employee:", err); setError("Failed to move employee."); }
+        } 
+        else if (targetEmployeeId && draggingEmployeeId !== targetEmployeeId) {
+            const deptEmployees = employees.filter(emp => emp.departmentId === targetDepartmentId);
+            const draggedIndex = deptEmployees.findIndex(emp => emp.id === draggingEmployeeId);
+            const targetIndex = deptEmployees.findIndex(emp => emp.id === targetEmployeeId);
+            
+            if (draggedIndex === -1 || targetIndex === -1) return;
+
+            const reorderedEmployees = [...deptEmployees];
+            const [removed] = reorderedEmployees.splice(draggedIndex, 1);
+            reorderedEmployees.splice(targetIndex, 0, removed);
+
+            const batch = writeBatch(db);
+            reorderedEmployees.forEach((emp, index) => {
+                const empRef = doc(db, `artifacts/${appId}/public/data/employees`, emp.id);
+                batch.update(empRef, { order: index });
+            });
+            try {
+                await batch.commit();
+                showMessage("Employee reordered!");
+            } catch (err) { console.error("Error reordering employees:", err); setError("Failed to reorder employees."); }
+        }
+
+        setDraggingEmployeeId(null);
+        setDragOverDeptId(null);
+        setDragOverEmployeeId(null);
+    };
+
+    const handleDragEnd = () => {
+        setDraggingEmployeeId(null);
+        setDragOverDeptId(null);
+        setDragOverEmployeeId(null);
+    };
+
+    // --- Week/Month/Year Navigation ---
+    const changeWeek = (weekModifier) => {
+        setCurrentDate(prev => {
+            const newDate = new Date(prev);
+            newDate.setDate(newDate.getDate() + (7 * weekModifier));
+            return newDate;
+        });
+    };
+    const goToToday = () => setCurrentDate(new Date());
+
+    const handleDateSelection = (year, month) => {
+        const now = new Date();
+        if (year === now.getFullYear() && month === now.getMonth()) {
+            setCurrentDate(now);
+        } else {
+            const firstOfMonth = new Date(year, month, 1);
+            const dayOfWeek = firstOfMonth.getDay(); // 0=Sun, 5=Fri, 6=Sat
+
+            if (dayOfWeek === 5 || dayOfWeek === 6) {
+                const nextSunday = new Date(firstOfMonth);
+                nextSunday.setDate(firstOfMonth.getDate() + (7 - dayOfWeek));
+                setCurrentDate(nextSunday);
+            } else {
+                setCurrentDate(firstOfMonth);
+            }
+        }
+    };
+
+    // --- Render Logic ---
+    if (error) return <ErrorDisplay error={error} />;
+    if (!isAuthReady) return <LoadingSpinner text="Initializing..." />;
+    
+    const weekDays = getWeekDays(getStartOfWeek(currentDate));
+    const weekHeader = formatWeekHeader(weekDays);
+    
+    const employeeStatusMap = Object.values(weeklyStatuses).reduce((acc, status) => {
+        if (!acc[status.employeeId]) acc[status.employeeId] = {};
+        acc[status.employeeId][status.monthYear] = status.dailyStatus;
+        return acc;
+    }, {});
+
+    return (
+        <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 font-sans text-gray-800 p-2 sm:p-4 lg:p-6">
+            <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+            
+            {employeeToDelete && <ConfirmationModal message={`Delete ${employeeToDelete.name}? This cannot be undone.`} onConfirm={() => handleDeleteEmployee(employeeToDelete.id)} onCancel={() => setEmployeeToDelete(null)} />}
+            {departmentToDelete && <ConfirmationModal message={`Delete ${departmentToDelete.name} and ALL its employees? This is irreversible.`} onConfirm={() => handleDeleteDepartment(departmentToDelete.id)} onCancel={() => setDepartmentToDelete(null)} />}
+
+            <header className="flex flex-col sm:flex-row justify-between items-center mb-6 bg-white p-4 rounded-xl shadow-lg">
+                <div className="flex items-center space-x-3">
+                    <h1 className="text-2xl md:text-3xl font-bold text-indigo-800">NHD Travel Calendar</h1>
+                    <button onClick={() => setView(v => v === 'weekly' ? 'yearly' : 'weekly')} className="p-2 rounded-full text-indigo-600 hover:bg-indigo-100 transition" title={view === 'weekly' ? 'Switch to Yearly View' : 'Switch to Weekly View'}>
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                    </button>
+                </div>
+                {view === 'weekly' && (
+                    <div className="flex items-center space-x-2 sm:space-x-4 mt-4 sm:mt-0">
+                        <button onClick={() => changeWeek(-1)} className="p-2 rounded-full bg-indigo-500 text-white hover:bg-indigo-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition shadow-md"><svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg></button>
+                        <div className="flex flex-col items-center">
+                            <span className="text-lg md:text-xl font-semibold text-gray-900 text-center">{weekHeader}</span>
+                            <button onClick={goToToday} className="mt-1 px-3 py-1 text-xs font-medium bg-gray-200 text-gray-700 rounded-full hover:bg-gray-300 transition">Go to Today</button>
+                        </div>
+                        <button onClick={() => changeWeek(1)} className="p-2 rounded-full bg-indigo-500 text-white hover:bg-indigo-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition shadow-md"><svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg></button>
+                    </div>
+                )}
+            </header>
+
+            {loading ? <LoadingSpinner text="Loading data..." /> : (
+                view === 'weekly' ? (
+                    <WeeklyView 
+                        isDateSelectorVisible={isDateSelectorVisible} setIsDateSelectorVisible={setIsDateSelectorVisible}
+                        isAddDeptVisible={isAddDeptVisible} setIsAddDeptVisible={setIsAddDeptVisible}
+                        handleDateSelection={handleDateSelection} currentDate={currentDate}
+                        newDepartmentName={newDepartmentName} setNewDepartmentName={setNewDepartmentName}
+                        handleAddDepartment={handleAddDepartment} departments={departments} employees={employees}
+                        editingDepartment={editingDepartment} setEditingDepartment={setEditingDepartment}
+                        handleUpdateDepartment={handleUpdateDepartment} setDepartmentToDelete={setDepartmentToDelete}
+                        newEmployeeInputs={newEmployeeInputs} setNewEmployeeInputs={setNewEmployeeInputs}
+                        handleAddEmployee={handleAddEmployee} editingEmployee={editingEmployee}
+                        setEditingEmployee={setEditingEmployee} handleUpdateEmployee={handleUpdateEmployee}
+                        setEmployeeToDelete={setEmployeeToDelete} weekDays={weekDays}
+                        employeeStatusMap={employeeStatusMap} handleStatusChange={handleStatusChange}
+                        handleDragStart={handleDragStart} handleDragEnd={handleDragEnd}
+                        handleDragOver={handleDragOver} handleDrop={handleDrop}
+                        draggingEmployeeId={draggingEmployeeId} dragOverEmployeeId={dragOverEmployeeId}
+                        dragOverDeptId={dragOverDeptId}
+                    />
+                ) : (
+                    <YearlyView 
+                        year={yearlyViewYear} setYear={setYearlyViewYear}
+                        departments={departments} employees={employees}
+                        yearlyData={yearlyData}
+                    />
+                )
+            )}
+            
+            <div className="mt-6 bg-white p-4 rounded-xl shadow-lg">
+                <h3 className="text-lg font-semibold text-gray-700 mb-3">Legend</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-2">
+                    {LEGEND_ORDER.map(abbr => {
+                        const definition = LEGEND_DEFINITIONS[abbr];
+                        const colorClass = abbr === 'WKND' ? 'bg-gray-200' : getStatusColorClass(abbr);
+                        return (
+                            <div key={abbr} className="flex items-center space-x-3">
+                                <div className={`w-5 h-5 rounded-md flex-shrink-0 ${colorClass} border border-gray-300`}></div>
+                                <span className="text-sm"><span className="font-bold">{abbr}</span>: {definition}</span>
+                            </div>
+                        );
+                    })}
+                </div>
+            </div>
+
+        </div>
+    );
+}
+
+const WeeklyView = ({
+    isDateSelectorVisible, setIsDateSelectorVisible, isAddDeptVisible, setIsAddDeptVisible,
+    handleDateSelection, currentDate, newDepartmentName, setNewDepartmentName, handleAddDepartment,
+    departments, employees, editingDepartment, setEditingDepartment, handleUpdateDepartment,
+    setDepartmentToDelete, newEmployeeInputs, setNewEmployeeInputs, handleAddEmployee,
+    editingEmployee, setEditingEmployee, handleUpdateEmployee, setEmployeeToDelete,
+    weekDays, employeeStatusMap, handleStatusChange, handleDragStart, handleDragEnd,
+    handleDragOver, handleDrop, draggingEmployeeId, dragOverEmployeeId, dragOverDeptId
+}) => (
+    <>
+        <div className="bg-white p-4 rounded-xl shadow-lg mb-6">
+            <div className="flex justify-between items-center cursor-pointer" onClick={() => setIsDateSelectorVisible(!isDateSelectorVisible)}>
+                <h2 className="text-lg font-semibold text-gray-700">Navigation</h2>
+                <button className="p-1 rounded-full hover:bg-gray-200 transition">
+                    <svg className={`w-6 h-6 text-gray-600 transform transition-transform duration-300 ${isDateSelectorVisible ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" /></svg>
+                </button>
+            </div>
+            <div className={`transition-all duration-500 ease-in-out overflow-hidden ${isDateSelectorVisible ? 'max-h-96 mt-4' : 'max-h-0'}`}>
+                <div className="flex justify-center flex-wrap gap-2 mb-4">
+                    {YEARS.map(year => (
+                        <button key={year} onClick={() => handleDateSelection(year, currentDate.getMonth())} className={`px-4 py-2 text-sm font-semibold rounded-lg transition ${currentDate.getFullYear() === year ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}>{year}</button>
+                    ))}
+                </div>
+                <div className="flex justify-center flex-wrap gap-1">
+                    {MONTH_NAMES.map((month, index) => (
+                        <button key={month} onClick={() => handleDateSelection(currentDate.getFullYear(), index)} className={`px-3 py-1 text-xs font-medium rounded-lg transition ${currentDate.getMonth() === index ? 'bg-indigo-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>{month}</button>
+                    ))}
+                </div>
+            </div>
+        </div>
+        
+        <div className="bg-white p-4 sm:p-6 rounded-xl shadow-lg mb-6">
+             <div className="flex justify-between items-center cursor-pointer" onClick={() => setIsAddDeptVisible(!isAddDeptVisible)}>
+                <h2 className="text-lg font-semibold text-gray-700">Add New Department</h2>
+                <button className="p-1 rounded-full hover:bg-gray-200 transition">
+                    <svg className={`w-6 h-6 text-gray-600 transform transition-transform duration-300 ${isAddDeptVisible ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" /></svg>
+                </button>
+            </div>
+            <div className={`transition-all duration-500 ease-in-out overflow-hidden ${isAddDeptVisible ? 'max-h-96 mt-4' : 'max-h-0'}`}>
+                <div className="flex flex-col sm:flex-row gap-3">
+                    <input type="text" placeholder="Department Name" value={newDepartmentName} onChange={(e) => setNewDepartmentName(e.target.value)} className="flex-grow p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-400 outline-none transition" />
+                    <button onClick={handleAddDepartment} className="px-6 py-3 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 transition shadow-md">Add Department</button>
+                </div>
+            </div>
+        </div>
+
+        <div className="overflow-x-auto bg-white rounded-xl shadow-lg p-1 sm:p-2">
+            <table className="min-w-full border-collapse">
+                <thead className="bg-gray-50">
+                    <tr>
+                        <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sticky left-0 bg-gray-50 z-20 w-48 md:w-56">Department / Employee</th>
+                        {weekDays.map(day => {
+                            const dayOfWeek = day.getDay();
+                            const isWeekend = dayOfWeek === 5 || dayOfWeek === 6; // Friday or Saturday
+                            return (
+                            <th key={day.toISOString()} className={`px-1 py-3 text-center text-xs font-medium uppercase tracking-wider w-24 ${isWeekend ? 'bg-gray-200 text-gray-600' : 'text-gray-500'}`}>
+                                <div>{day.toLocaleString('en-US', { weekday: 'short' })}</div>
+                                <div className="text-lg font-semibold">{day.getDate()}</div>
+                            </th>
+                            );
+                        })}
+                    </tr>
+                </thead>
+                {departments.map(dept => (
+                    <tbody 
+                        key={dept.id}
+                        className={`divide-y divide-gray-200 transition-colors duration-300 ${dragOverDeptId === dept.id && draggingEmployeeId && employees.find(e=>e.id === draggingEmployeeId)?.departmentId !== dept.id ? 'bg-blue-100' : ''}`}
+                        onDragEnter={(e) => { e.preventDefault(); setDragOverDeptId(dept.id); }}
+                        onDragLeave={(e) => { e.preventDefault(); setDragOverDeptId(null); }}
+                        onDragOver={(e) => e.preventDefault()}
+                        onDrop={(e) => handleDrop(e, dept.id, null)}
+                    >
+                        <tr className="bg-indigo-50 group">
+                            <td className="px-3 py-3 font-bold text-indigo-800 sticky left-0 bg-indigo-50 z-10 w-48 md:w-56 align-top">
+                                {editingDepartment.id === dept.id ? (
+                                     <div className="flex flex-col gap-2">
+                                        <input type="text" value={editingDepartment.name} onChange={(e) => setEditingDepartment({...editingDepartment, name: e.target.value})} className="p-2 text-sm border border-indigo-300 rounded-md focus:ring-1 focus:ring-indigo-400 outline-none" autoFocus />
+                                        <div className="flex gap-2">
+                                            <button onClick={handleUpdateDepartment} className="px-3 py-1 bg-green-500 text-white text-xs font-semibold rounded-md hover:bg-green-600 transition shadow-sm">Save</button>
+                                            <button onClick={() => setEditingDepartment({id: null, name: ''})} className="px-3 py-1 bg-gray-200 text-gray-700 text-xs font-semibold rounded-md hover:bg-gray-300 transition">Cancel</button>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="flex justify-between items-start">
+                                        <div className="text-base break-words pr-2">{dept.name}</div>
+                                        <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                                            <button onClick={() => setEditingDepartment({ id: dept.id, name: dept.name })} className="p-1 text-blue-600 hover:text-blue-800 hover:bg-blue-100 rounded-full"><svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M17.414 2.586a2 2 0 00-2.828 0L7 10.172V13h2.828l7.586-7.586a2 2 0 000-2.828z"></path><path fillRule="evenodd" d="M2 6a2 2 0 012-2h4a1 1 0 010 2H4v10h10v-4a1 1 0 112 0v4a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" clipRule="evenodd"></path></svg></button>
+                                            <button onClick={() => setDepartmentToDelete(dept)} className="p-1 text-red-500 hover:text-red-700 hover:bg-red-100 rounded-full"><svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd"></path></svg></button>
+                                        </div>
+                                    </div>
+                                )}
+                                <div className="flex items-center mt-2 gap-2">
+                                    <input type="text" placeholder="New Employee..." value={newEmployeeInputs[dept.id] || ''} onChange={(e) => setNewEmployeeInputs(prev => ({ ...prev, [dept.id]: e.target.value }))} className="flex-grow p-2 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-indigo-400 outline-none" />
+                                    <button onClick={() => handleAddEmployee(dept.id)} className="px-3 py-2 bg-blue-500 text-white text-xs font-semibold rounded-md hover:bg-blue-600 transition shadow-sm">ADD</button>
+                                </div>
+                            </td>
+                            <td colSpan={weekDays.length} className="bg-indigo-50"></td>
+                        </tr>
+                        {employees.filter(emp => emp.departmentId === dept.id).map((emp) => (
+                            <tr 
+                                key={emp.id} 
+                                draggable="true"
+                                onDragStart={(e) => handleDragStart(e, emp.id)}
+                                onDragEnd={handleDragEnd}
+                                onDragOver={(e) => handleDragOver(e, emp.id)}
+                                onDrop={(e) => handleDrop(e, dept.id, emp.id)}
+                                className={`hover:bg-gray-50 group cursor-grab ${draggingEmployeeId === emp.id ? 'opacity-50 bg-gray-200' : ''}`}
+                            >
+                                <td className={`px-3 py-0 text-sm font-medium text-gray-800 sticky left-0 bg-white group-hover:bg-gray-50 z-10 w-48 md:w-56`}>
+                                    <div className={`h-full flex justify-between items-center border-t-2 ${dragOverEmployeeId === emp.id ? 'border-blue-500' : 'border-transparent'}`}>
+                                        {editingEmployee.id === emp.id ? (
+                                            <div className="flex items-center gap-2 w-full py-2">
+                                                <input type="text" value={editingEmployee.name} onChange={(e) => setEditingEmployee({...editingEmployee, name: e.target.value})} className="flex-grow p-1 text-sm border border-indigo-300 rounded-md focus:ring-1 focus:ring-indigo-400 outline-none" autoFocus />
+                                                <button onClick={handleUpdateEmployee} className="p-1 text-green-600 hover:bg-green-100 rounded-full"><svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"></path></svg></button>
+                                                <button onClick={() => setEditingEmployee({id: null, name: ''})} className="p-1 text-red-600 hover:bg-red-100 rounded-full"><svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.697a1 1 0 010-1.414z" clipRule="evenodd"></path></svg></button>
+                                            </div>
+                                        ) : (
+                                            <div className="flex justify-between items-center w-full py-2">
+                                                <span className="break-words pr-2">{emp.name}</span>
+                                                <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                                                    <button onClick={() => setEditingEmployee({ id: emp.id, name: emp.name })} className="p-1 text-blue-600 hover:text-blue-800 hover:bg-blue-100 rounded-full"><svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M17.414 2.586a2 2 0 00-2.828 0L7 10.172V13h2.828l7.586-7.586a2 2 0 000-2.828z"></path><path fillRule="evenodd" d="M2 6a2 2 0 012-2h4a1 1 0 010 2H4v10h10v-4a1 1 0 112 0v4a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" clipRule="evenodd"></path></svg></button>
+                                                    <button onClick={() => setEmployeeToDelete(emp)} className="p-1 text-red-500 hover:text-red-700 hover:bg-red-100 rounded-full"><svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd"></path></svg></button>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                </td>
+                                {weekDays.map(day => {
+                                    const dayOfWeek = day.getDay();
+                                    const isWeekend = dayOfWeek === 5 || dayOfWeek === 6;
+
+                                    if (isWeekend) {
+                                        return (
+                                            <td key={day.toISOString()} className="px-1 py-1 whitespace-nowrap text-sm text-center bg-gray-200">
+                                                <div className="p-1 text-gray-500 font-medium rounded-md text-xs">WKND</div>
+                                            </td>
+                                        );
+                                    }
+
+                                    const monthYear = `${day.getFullYear()}-${(day.getMonth() + 1).toString().padStart(2, '0')}`;
+                                    const status = employeeStatusMap[emp.id]?.[monthYear]?.[day.getDate().toString()] ?? "NEOM";
+                                    const statusColorClass = getStatusColorClass(status);
+                                    return (
+                                        <td key={day.toISOString()} className="px-1 py-1 whitespace-nowrap text-sm text-center">
+                                            <select value={status} onChange={(e) => handleStatusChange(emp.id, day, e.target.value)} className={`block w-full p-1 border-gray-200 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm hover:border-gray-400 transition-colors duration-200 ${statusColorClass}`}>
+                                                {STATUS_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                                            </select>
+                                        </td>
+                                    );
+                                })}
+                            </tr>
+                        ))}
+                    </tbody>
+                ))}
+            </table>
+        </div>
+    </>
+);
+
+const YearlyView = ({ year, setYear, departments, employees, yearlyData }) => {
+    const tableContainerRef = useRef(null);
+    const daysInYear = (y) => (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0 ? 366 : 365;
+    const days = Array.from({ length: daysInYear(year) }, (_, i) => new Date(year, 0, i + 1));
+
+    const jumpToCurrentMonth = () => {
+        const now = new Date();
+        if (now.getFullYear() !== year) {
+            setYear(now.getFullYear());
+            setTimeout(() => {
+                const currentMonth = now.getMonth();
+                const monthHeader = tableContainerRef.current?.querySelector(`[data-month-id="month-${currentMonth}"]`);
+                if (monthHeader) {
+                    monthHeader.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+                }
+            }, 100);
+            return;
+        }
+        const currentMonth = now.getMonth();
+        const monthHeader = tableContainerRef.current?.querySelector(`[data-month-id="month-${currentMonth}"]`);
+        if (monthHeader) {
+            monthHeader.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+        }
+    };
+    
+    return (
+        <div className="bg-white p-4 rounded-xl shadow-lg">
+            <div className="flex justify-center items-center mb-4 space-x-4">
+                <h2 className="text-xl font-semibold">Yearly Overview</h2>
+                <div className="flex space-x-2">
+                    {YEARS.map(y => (
+                        <button key={y} onClick={() => setYear(y)} className={`px-4 py-2 text-sm font-semibold rounded-lg transition ${year === y ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}>{y}</button>
+                    ))}
+                </div>
+                <button onClick={jumpToCurrentMonth} className="px-3 py-1 text-xs font-medium bg-gray-200 text-gray-700 rounded-full hover:bg-gray-300 transition">Go to this Month</button>
+            </div>
+            <div className="overflow-x-auto" ref={tableContainerRef}>
+                <table className="min-w-full border-collapse">
+                    <thead>
+                        <tr>
+                            <th className="sticky left-0 bg-white p-2 text-xs font-medium text-gray-500 uppercase z-10 w-48">Department / Employee</th>
+                            {MONTH_NAMES.map((monthName, index) => {
+                                const daysInMonth = new Date(year, index + 1, 0).getDate();
+                                return <th key={monthName} colSpan={daysInMonth} data-month-id={`month-${index}`} className="p-1 text-center text-xs font-medium text-gray-500 uppercase">{monthName}</th>
+                            })}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {departments.map(dept => (
+                            <React.Fragment key={dept.id}>
+                                <tr className="bg-indigo-50">
+                                    <td className="sticky left-0 bg-indigo-50 p-2 font-bold text-indigo-800 text-sm z-10 w-48">{dept.name}</td>
+                                    <td colSpan={daysInYear(year)} className="bg-indigo-50"></td>
+                                </tr>
+                                {employees.filter(emp => emp.departmentId === dept.id).map(emp => (
+                                    <tr key={emp.id}>
+                                        <td className="sticky left-0 bg-white p-2 text-sm font-medium text-gray-800 z-10 w-48">{emp.name}</td>
+                                        {days.map(day => {
+                                            const dayOfWeek = day.getDay();
+                                            const isWeekend = dayOfWeek === 5 || dayOfWeek === 6;
+                                            
+                                            const monthYear = `${day.getFullYear()}-${(day.getMonth() + 1).toString().padStart(2, '0')}`;
+                                            const status = yearlyData[emp.id]?.[monthYear]?.[day.getDate().toString()] ?? "NEOM";
+                                            const finalStatus = isWeekend ? 'WKND' : status;
+                                            
+                                            return (
+                                                <td key={day.toISOString()} className="p-0">
+                                                    <div className={`w-4 h-4 ${getStatusColorClass(finalStatus)}`} title={`${day.toLocaleDateString()}: ${finalStatus}`}></div>
+                                                </td>
+                                            );
+                                        })}
+                                    </tr>
+                                ))}
+                            </React.Fragment>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    );
+};
+
+export default App;
