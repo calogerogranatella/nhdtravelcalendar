@@ -13,6 +13,37 @@
         body {
             font-family: 'Inter', sans-serif;
         }
+        .tooltip {
+            position: absolute;
+            bottom: 125%;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: #1e3a8a; /* Dark indigo */
+            color: white;
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-size: 12px;
+            white-space: nowrap;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.2s 0.1s ease-in-out, visibility 0.2s 0.1s ease-in-out; /* Added delay */
+            z-index: 20;
+            pointer-events: none;
+        }
+        .heatmap-cell:hover .tooltip {
+            opacity: 1;
+            visibility: visible;
+        }
+        .heatmap-cell .day-square {
+            transition: transform 0.15s ease-in-out;
+        }
+        .heatmap-cell:hover .day-square {
+            transform: scale(1.5);
+            z-index: 10;
+            position: relative;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+            border-radius: 2px;
+        }
     </style>
 </head>
 <body>
@@ -525,6 +556,10 @@
             const tableContainerRef = useRef(null);
             const daysInYear = (y) => (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0 ? 366 : 365;
             const days = Array.from({ length: daysInYear(year) }, (_, i) => new Date(year, 0, i + 1));
+            
+            const startOfCurrentWeek = getStartOfWeek(new Date());
+            const endOfCurrentWeek = new Date(startOfCurrentWeek);
+            endOfCurrentWeek.setDate(startOfCurrentWeek.getDate() + 6);
 
             const jumpToCurrentMonth = () => {
                 const now = new Date();
@@ -585,10 +620,19 @@
                                                     const key = `${emp.id}-${day.getFullYear()}-${day.getMonth()}-${day.getDate()}`;
                                                     const status = statuses[key] || "NEOM";
                                                     const finalStatus = isWeekend ? 'WKND' : status;
+
+                                                    const isCurrentWeek = day >= startOfCurrentWeek && day <= endOfCurrentWeek;
+                                                    let borderClass = '';
+                                                    if(isCurrentWeek) {
+                                                        borderClass = 'border-t border-b border-blue-300';
+                                                        if(dayOfWeek === 0) borderClass += ' border-l';
+                                                        if(dayOfWeek === 6) borderClass += ' border-r';
+                                                    }
                                                     
                                                     return (
-                                                        <td key={day.toISOString()} className="p-0">
-                                                            <div className={`w-4 h-4 ${getStatusColorClass(finalStatus)}`} title={`${day.toLocaleDateString()}: ${finalStatus}`}></div>
+                                                        <td key={day.toISOString()} className={`p-1 relative heatmap-cell ${borderClass}`}>
+                                                            <div className={`w-4 h-4 day-square ${getStatusColorClass(finalStatus)}`}></div>
+                                                            <div className="tooltip">{`${day.toLocaleDateString()}: ${finalStatus}`}</div>
                                                         </td>
                                                     );
                                                 })}
