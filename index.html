@@ -53,7 +53,7 @@
         const { useState, useEffect, useCallback, useRef } = React;
 
         // --- Constants ---
-        const STATUS_OPTIONS = ["NEOM", "VAC", "REM", "BT/PD", "MED", "NEOM/T", "T/NEOM", ""];
+        const STATUS_OPTIONS = ["NEOM", "VAC", "REM", "BT/PD", "NEOM/T", "T/NEOM", "MED"];
         const LEGEND_DEFINITIONS = {
             "NEOM": "In NEOM",
             "VAC": "On Vacation",
@@ -64,7 +64,7 @@
             "T/NEOM": "Arriving before 12 PM",
             "WKND": "Weekend"
         };
-        const LEGEND_ORDER = ["NEOM", "BT/PD", "MED", "VAC", "NEOM/T", "WKND", "REM", "T/NEOM"];
+        const LEGEND_ORDER = ["NEOM", "VAC", "REM", "BT/PD", "NEOM/T", "T/NEOM", "MED", "WKND"];
         const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
         const YEARS = [2025, 2026];
 
@@ -150,30 +150,30 @@
         // --- Main App Component ---
         function App() {
             // Data states
-            const [departments, setDepartments] = useState(initialDepartments);
-            const [employees, setEmployees] = useState(initialEmployees);
-            const [statuses, setStatuses] = useState({}); // { 'employeeId-monthYear-day': 'STATUS' }
+            const [departments, setDepartments] = React.useState(initialDepartments);
+            const [employees, setEmployees] = React.useState(initialEmployees);
+            const [statuses, setStatuses] = React.useState({}); // { 'employeeId-monthYear-day': 'STATUS' }
 
             // UI states
-            const [currentDate, setCurrentDate] = useState(new Date());
-            const [newDepartmentName, setNewDepartmentName] = useState('');
-            const [newEmployeeInputs, setNewEmployeeInputs] = useState({});
-            const [message, setMessage] = useState('');
-            const [isDateSelectorVisible, setIsDateSelectorVisible] = useState(true);
-            const [isAddDeptVisible, setIsAddDeptVisible] = useState(true);
-            const [view, setView] = useState('weekly');
-            const [yearlyViewYear, setYearlyViewYear] = useState(new Date().getFullYear());
+            const [currentDate, setCurrentDate] = React.useState(new Date());
+            const [newDepartmentName, setNewDepartmentName] = React.useState('');
+            const [newEmployeeInputs, setNewEmployeeInputs] = React.useState({});
+            const [message, setMessage] = React.useState('');
+            const [isDateSelectorVisible, setIsDateSelectorVisible] = React.useState(true);
+            const [isAddDeptVisible, setIsAddDeptVisible] = React.useState(true);
+            const [view, setView] = React.useState('weekly');
+            const [yearlyViewYear, setYearlyViewYear] = React.useState(new Date().getFullYear());
             
             // State for modals and editing
-            const [employeeToDelete, setEmployeeToDelete] = useState(null);
-            const [departmentToDelete, setDepartmentToDelete] = useState(null);
-            const [editingDepartment, setEditingDepartment] = useState({ id: null, name: '' });
-            const [editingEmployee, setEditingEmployee] = useState({ id: null, name: '' });
+            const [employeeToDelete, setEmployeeToDelete] = React.useState(null);
+            const [departmentToDelete, setDepartmentToDelete] = React.useState(null);
+            const [editingDepartment, setEditingDepartment] = React.useState({ id: null, name: '' });
+            const [editingEmployee, setEditingEmployee] = React.useState({ id: null, name: '' });
 
             // State for native drag-and-drop
-            const [draggingEmployeeId, setDraggingEmployeeId] = useState(null);
-            const [dragOverDeptId, setDragOverDeptId] = useState(null);
-            const [dragOverEmployeeId, setDragOverEmployeeId] = useState(null);
+            const [draggingEmployeeId, setDraggingEmployeeId] = React.useState(null);
+            const [dragOverDeptId, setDragOverDeptId] = React.useState(null);
+            const [dragOverEmployeeId, setDragOverEmployeeId] = React.useState(null);
 
             const showMessage = (msg) => {
                 setMessage(msg);
@@ -350,10 +350,8 @@
                     {view === 'weekly' ? (
                         <WeeklyView 
                             isDateSelectorVisible={isDateSelectorVisible} setIsDateSelectorVisible={setIsDateSelectorVisible}
-                            isAddDeptVisible={isAddDeptVisible} setIsAddDeptVisible={setIsAddDeptVisible}
                             handleDateSelection={handleDateSelection} currentDate={currentDate}
-                            newDepartmentName={newDepartmentName} setNewDepartmentName={setNewDepartmentName}
-                            handleAddDepartment={handleAddDepartment} departments={departments} employees={employees}
+                            departments={departments} employees={employees}
                             editingDepartment={editingDepartment} setEditingDepartment={setEditingDepartment}
                             handleUpdateDepartment={handleUpdateDepartment} setDepartmentToDelete={setDepartmentToDelete}
                             newEmployeeInputs={newEmployeeInputs} setNewEmployeeInputs={setNewEmployeeInputs}
@@ -365,6 +363,7 @@
                             handleDragOver={handleDragOver} handleDrop={handleDrop}
                             draggingEmployeeId={draggingEmployeeId} dragOverEmployeeId={dragOverEmployeeId}
                             dragOverDeptId={dragOverDeptId}
+                            setDragOverDeptId={setDragOverDeptId}
                         />
                     ) : (
                         <YearlyView 
@@ -374,19 +373,39 @@
                         />
                     )}
                     
-                    <div className="mt-6 bg-white p-4 rounded-xl shadow-lg">
-                        <h3 className="text-lg font-semibold text-gray-700 mb-3">Legend</h3>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-2">
-                            {LEGEND_ORDER.map(abbr => {
-                                const definition = LEGEND_DEFINITIONS[abbr];
-                                const colorClass = abbr === 'WKND' ? 'bg-gray-200' : getStatusColorClass(abbr);
-                                return (
-                                    <div key={abbr} className="flex items-center space-x-3">
-                                        <div className={`w-5 h-5 rounded-md flex-shrink-0 ${colorClass} border border-gray-300`}></div>
-                                        <span className="text-sm"><span className="font-bold">{abbr}</span>: {definition}</span>
+                    <div className="mt-6 flex flex-col md:flex-row gap-6 items-start">
+                        {view === 'weekly' && (
+                            <div className="w-full md:w-1/2 bg-white p-4 sm:p-6 rounded-xl shadow-lg">
+                                <div className="flex justify-between items-center cursor-pointer" onClick={() => setIsAddDeptVisible(!isAddDeptVisible)}>
+                                    <h2 className="text-lg font-semibold text-gray-700">Add New Department</h2>
+                                    <button className="p-1 rounded-full hover:bg-gray-200 transition">
+                                        <svg className={`w-6 h-6 text-gray-600 transform transition-transform duration-300 ${isAddDeptVisible ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" /></svg>
+                                    </button>
+                                </div>
+                                <div className={`transition-all duration-500 ease-in-out overflow-hidden ${isAddDeptVisible ? 'max-h-96 mt-4' : 'max-h-0'}`}>
+                                    <div className="flex flex-col sm:flex-row gap-3">
+                                        <input type="text" placeholder="Department Name" value={newDepartmentName} onChange={(e) => setNewDepartmentName(e.target.value)} className="flex-grow p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-400 outline-none transition" />
+                                        <button onClick={handleAddDepartment} className="px-6 py-3 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 transition shadow-md">Add Department</button>
                                     </div>
-                                );
-                            })}
+                                </div>
+                            </div>
+                        )}
+                        <div className={`w-full ${view === 'weekly' ? 'md:w-1/2' : 'md:w-full'}`}>
+                            <div className="bg-white p-4 rounded-xl shadow-lg">
+                                <h3 className="text-lg font-semibold text-gray-700 mb-3">Legend</h3>
+                                <div className="flex flex-col space-y-2">
+                                    {LEGEND_ORDER.map(abbr => {
+                                        const definition = LEGEND_DEFINITIONS[abbr];
+                                        const colorClass = abbr === 'WKND' ? 'bg-gray-200' : getStatusColorClass(abbr);
+                                        return (
+                                            <div key={abbr} className="flex items-center space-x-3">
+                                                <div className={`w-5 h-5 rounded-md flex-shrink-0 ${colorClass} border border-gray-300`}></div>
+                                                <span className="text-sm"><span className="font-bold">{abbr}</span>: {definition}</span>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -394,13 +413,13 @@
         }
 
         const WeeklyView = ({
-            isDateSelectorVisible, setIsDateSelectorVisible, isAddDeptVisible, setIsAddDeptVisible,
-            handleDateSelection, currentDate, newDepartmentName, setNewDepartmentName, handleAddDepartment,
+            handleDateSelection, currentDate,
             departments, employees, editingDepartment, setEditingDepartment, handleUpdateDepartment,
             setDepartmentToDelete, newEmployeeInputs, setNewEmployeeInputs, handleAddEmployee,
             editingEmployee, setEditingEmployee, handleUpdateEmployee, setEmployeeToDelete,
             weekDays, statuses, handleStatusChange, handleDragStart, handleDragEnd,
-            handleDragOver, handleDrop, draggingEmployeeId, dragOverEmployeeId, dragOverDeptId
+            handleDragOver, handleDrop, draggingEmployeeId, dragOverEmployeeId, dragOverDeptId,
+            isDateSelectorVisible, setIsDateSelectorVisible, setDragOverDeptId
         }) => (
             <>
                 <div className="bg-white p-4 rounded-xl shadow-lg mb-6">
@@ -424,21 +443,6 @@
                     </div>
                 </div>
                 
-                <div className="bg-white p-4 sm:p-6 rounded-xl shadow-lg mb-6">
-                     <div className="flex justify-between items-center cursor-pointer" onClick={() => setIsAddDeptVisible(!isAddDeptVisible)}>
-                        <h2 className="text-lg font-semibold text-gray-700">Add New Department</h2>
-                        <button className="p-1 rounded-full hover:bg-gray-200 transition">
-                            <svg className={`w-6 h-6 text-gray-600 transform transition-transform duration-300 ${isAddDeptVisible ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" /></svg>
-                        </button>
-                    </div>
-                    <div className={`transition-all duration-500 ease-in-out overflow-hidden ${isAddDeptVisible ? 'max-h-96 mt-4' : 'max-h-0'}`}>
-                        <div className="flex flex-col sm:flex-row gap-3">
-                            <input type="text" placeholder="Department Name" value={newDepartmentName} onChange={(e) => setNewDepartmentName(e.target.value)} className="flex-grow p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-400 outline-none transition" />
-                            <button onClick={handleAddDepartment} className="px-6 py-3 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 transition shadow-md">Add Department</button>
-                        </div>
-                    </div>
-                </div>
-
                 <div className="overflow-x-auto bg-white rounded-xl shadow-lg p-1 sm:p-2">
                     <table className="min-w-full border-collapse">
                         <thead className="bg-gray-50">
@@ -553,7 +557,7 @@
         );
 
         const YearlyView = ({ year, setYear, departments, employees, statuses }) => {
-            const tableContainerRef = useRef(null);
+            const tableContainerRef = React.useRef(null);
             const daysInYear = (y) => (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0 ? 366 : 365;
             const days = Array.from({ length: daysInYear(year) }, (_, i) => new Date(year, 0, i + 1));
             
@@ -599,7 +603,7 @@
                                     <th className="sticky left-0 bg-white p-2 text-xs font-medium text-gray-500 uppercase z-10 w-48">Department / Employee</th>
                                     {MONTH_NAMES.map((monthName, index) => {
                                         const daysInMonth = new Date(year, index + 1, 0).getDate();
-                                        return <th key={monthName} colSpan={daysInMonth} data-month-id={`month-${index}`} className="p-1 text-center text-xs font-medium text-gray-500 uppercase">{monthName}</th>
+                                        return <th key={monthName} colSpan={daysInMonth} data-month-id={`month-${index}`} className="p-1 text-left pl-2 text-xs font-medium text-gray-500 uppercase">{monthName}</th>
                                     })}
                                 </tr>
                             </thead>
@@ -610,9 +614,9 @@
                                             <td className="sticky left-0 bg-indigo-50 p-2 font-bold text-indigo-800 text-sm z-10 w-48">{dept.name}</td>
                                             <td colSpan={daysInYear(year)} className="bg-indigo-50"></td>
                                         </tr>
-                                        {employees.filter(emp => emp.departmentId === dept.id).map(emp => (
-                                            <tr key={emp.id}>
-                                                <td className="sticky left-0 bg-white p-2 text-sm font-medium text-gray-800 z-10 w-48">{emp.name}</td>
+                                        {employees.filter(emp => emp.departmentId === dept.id).map((emp, empIndex) => (
+                                            <tr key={emp.id} className={empIndex % 2 === 0 ? 'bg-gray-50' : ''}>
+                                                <td className={`sticky left-0 p-2 text-sm font-medium text-gray-800 z-10 w-48 ${empIndex % 2 === 0 ? 'bg-gray-50' : 'bg-white'}`}>{emp.name}</td>
                                                 {days.map(day => {
                                                     const dayOfWeek = day.getDay();
                                                     const isWeekend = dayOfWeek === 5 || dayOfWeek === 6;
@@ -629,8 +633,10 @@
                                                         if(dayOfWeek === 6) borderClass += ' border-r';
                                                     }
                                                     
+                                                    const cellClass = isWeekend ? '' : 'heatmap-cell';
+                                                    
                                                     return (
-                                                        <td key={day.toISOString()} className={`p-1 relative heatmap-cell ${borderClass}`}>
+                                                        <td key={day.toISOString()} className={`p-1 relative ${cellClass} ${borderClass}`}>
                                                             <div className={`w-4 h-4 day-square ${getStatusColorClass(finalStatus)}`}></div>
                                                             <div className="tooltip">{`${day.toLocaleDateString()}: ${finalStatus}`}</div>
                                                         </td>
