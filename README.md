@@ -12,36 +12,28 @@ Managers and team members can see at a glance who is available, on vacation, or 
 
 **✨ Key Features**
 
-Real-time Collaboration: Powered by Firebase Firestore, all updates are synchronized instantly across all users.
-
 Dual Calendar Views: Switch seamlessly between a detailed Weekly View and a high-level Yearly Overview.
 
-Dynamic Department & Employee Management: Easily add, rename, and delete departments. Add, edit, and remove employees within their respective teams.
+Dynamic Client-Side Management: Easily add, rename, and delete departments and employees directly in the interface. All data is managed in the browser session.
 
-Drag-and-Drop Functionality: Intuitively reorder employees within a department or move them between departments with a simple drag-and-drop action.
+Drag-and-Drop Functionality: Intuitively reorder employees within a department or move them between departments.
 
 Comprehensive Status Tracking: Assign daily statuses to team members, including In NEOM, Vacation, Remote Work, Business Travel, and more.
 
 Intuitive Navigation: Quickly navigate between weeks, months, and years to view past, present, and future schedules.
 
-Persistent Data: All information is securely stored in a cloud database, ensuring data is never lost.
+Frontend-Only Architecture: A lightweight, client-side application with no backend dependencies, making it simple to deploy.
 
 
 **🛠️ Technologies Used**
 
 Frontend: React (with Hooks)
 
-Backend & Database: Firebase
-
-Firestore: Real-time NoSQL database for storing departments, employees, and statuses.
-
-Firebase Authentication: For user management and securing the application.
-
 Styling: Tailwind CSS for a modern, responsive user interface.
 
 Development Assistance: Coded with assistance from Google Gemini.
 
-Deployment: (e.g., Vercel, Netlify, Azure App Service)
+Deployment Link: https://calogerogranatella.github.io/nhdtravelcalendar/
 
 
 **👤 Author**
