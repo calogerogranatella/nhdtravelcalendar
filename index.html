@@ -44,6 +44,22 @@
             box-shadow: 0 4px 8px rgba(0,0,0,0.2);
             border-radius: 2px;
         }
+        /* Custom scrollbar for dark theme */
+        html.dark ::-webkit-scrollbar {
+            width: 12px;
+            height: 12px;
+        }
+        html.dark ::-webkit-scrollbar-track {
+            background: #000000;
+        }
+        html.dark ::-webkit-scrollbar-thumb {
+            background-color: #4A5568; /* gray-600 */
+            border-radius: 10px;
+            border: 3px solid #000000;
+        }
+        html.dark ::-webkit-scrollbar-thumb:hover {
+            background-color: #718096; /* gray-500 */
+        }
     </style>
 </head>
 <body>
@@ -115,33 +131,33 @@
         };
 
         // --- Styling Helper Function ---
-        const getStatusColorClass = (status) => {
+        const getStatusColorClass = (status, theme) => {
             switch (status) {
                 case 'REM':
-                    return 'bg-yellow-100';
+                    return 'bg-yellow-100 text-yellow-800 font-semibold';
                 case 'VAC':
                 case 'MED':
-                    return 'bg-blue-200';
+                    return 'bg-blue-200 text-blue-800 font-semibold';
                 case 'BT/PD':
-                    return 'bg-green-200';
+                    return 'bg-green-200 text-green-800 font-semibold';
                 case 'NEOM/T':
-                    return 'bg-gradient-to-r from-white to-blue-200';
+                    return theme === 'dark' ? 'bg-gradient-to-r from-gray-800 to-blue-200 text-gray-800 font-semibold' : 'bg-gradient-to-r from-white to-blue-200 text-blue-800 font-semibold';
                 case 'T/NEOM':
-                    return 'bg-gradient-to-r from-blue-200 to-white';
+                    return theme === 'dark' ? 'bg-gradient-to-r from-blue-200 to-gray-800 text-gray-800 font-semibold' : 'bg-gradient-to-r from-blue-200 to-white text-blue-800 font-semibold';
                 case 'WKND':
-                     return 'bg-gray-200';
-                default:
-                    return 'bg-white';
+                     return theme === 'dark' ? 'bg-gray-700' : 'bg-gray-200';
+                default: // NEOM
+                    return theme === 'dark' ? 'bg-black text-gray-200 border border-gray-700' : 'bg-white text-gray-800';
             }
         };
 
         // --- Helper Components ---
-        const ConfirmationModal = ({ message, onConfirm, onCancel }) => (
+        const ConfirmationModal = ({ message, onConfirm, onCancel, theme }) => (
             <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50">
-                <div className="bg-white p-6 rounded-xl shadow-2xl w-full max-w-sm mx-4">
-                    <p className="text-lg text-gray-800 mb-6">{message}</p>
+                <div className={`p-6 rounded-xl shadow-2xl w-full max-w-sm mx-4 ${theme === 'dark' ? 'bg-gray-800 border border-gray-700' : 'bg-white'}`}>
+                    <p className={`text-lg mb-6 ${theme === 'dark' ? 'text-gray-200' : 'text-gray-800'}`}>{message}</p>
                     <div className="flex justify-end space-x-4">
-                        <button onClick={onCancel} className="px-6 py-2 rounded-lg bg-gray-200 text-gray-700 hover:bg-gray-300 transition">Cancel</button>
+                        <button onClick={onCancel} className={`px-6 py-2 rounded-lg transition ${theme === 'dark' ? 'bg-gray-600 text-gray-200 hover:bg-gray-500' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}>Cancel</button>
                         <button onClick={onConfirm} className="px-6 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700 transition">Confirm</button>
                     </div>
                 </div>
@@ -150,10 +166,30 @@
 
         // --- Main App Component ---
         function App() {
+            const [theme, setTheme] = React.useState('light');
+
+            React.useEffect(() => {
+                const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+                setTheme(mediaQuery.matches ? 'dark' : 'light');
+
+                const handler = (e) => setTheme(e.matches ? 'dark' : 'light');
+                mediaQuery.addEventListener('change', handler);
+                return () => mediaQuery.removeEventListener('change', handler);
+            }, []);
+
+            React.useEffect(() => {
+                const root = window.document.documentElement;
+                if (theme === 'dark') {
+                    root.classList.add('dark');
+                } else {
+                    root.classList.remove('dark');
+                }
+            }, [theme]);
+
             // Data states
             const [departments, setDepartments] = React.useState(initialDepartments);
             const [employees, setEmployees] = React.useState(initialEmployees);
-            const [statuses, setStatuses] = React.useState({}); // { 'employeeId-monthYear-day': 'STATUS' }
+            const [statuses, setStatuses] = React.useState({});
 
             // UI states
             const [currentDate, setCurrentDate] = React.useState(new Date());
@@ -181,7 +217,6 @@
                 setTimeout(() => setMessage(''), 3000);
             };
 
-            // --- Data Manipulation Handlers ---
             const handleAddDepartment = () => {
                 if (!newDepartmentName.trim()) return;
                 const newDept = { id: `dept_${Date.now()}`, name: newDepartmentName.trim(), createdAt: new Date() };
@@ -204,7 +239,6 @@
                 setDepartments(departments.filter(d => d.id !== departmentId));
                 setEmployees(employees.filter(emp => emp.departmentId !== departmentId));
                 
-                // Also clear statuses for the deleted employees
                 const newStatuses = { ...statuses };
                 Object.keys(newStatuses).forEach(key => {
                     const empId = key.split('-')[0];
@@ -260,7 +294,6 @@
                 setStatuses(prev => ({ ...prev, [key]: newStatus }));
             };
 
-            // --- Drag and Drop Handlers ---
             const handleDragStart = (e, employeeId) => setDraggingEmployeeId(employeeId);
             const handleDragOver = (e, employeeId) => {
                 e.preventDefault();
@@ -301,7 +334,6 @@
                 handleDragEnd();
             };
 
-            // --- Navigation ---
             const changeWeek = (mod) => setCurrentDate(d => new Date(d.setDate(d.getDate() + 7 * mod)));
             const goToToday = () => setCurrentDate(new Date());
             const handleDateSelection = (year, month) => {
@@ -324,32 +356,48 @@
             const weekDays = getWeekDays(getStartOfWeek(currentDate));
             const weekHeader = formatWeekHeader(weekDays);
 
-            return (
-                <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 font-sans text-gray-800 p-2 sm:p-4 lg:p-6">
-                    {employeeToDelete && <ConfirmationModal message={`Delete ${employeeToDelete.name}? This cannot be undone.`} onConfirm={() => handleDeleteEmployee(employeeToDelete.id)} onCancel={() => setEmployeeToDelete(null)} />}
-                    {departmentToDelete && <ConfirmationModal message={`Delete ${departmentToDelete.name} and ALL its employees? This is irreversible.`} onConfirm={() => handleDeleteDepartment(departmentToDelete.id)} onCancel={() => setDepartmentToDelete(null)} />}
+            const themeClasses = {
+                bg: theme === 'dark' ? 'bg-black' : 'bg-gradient-to-br from-blue-50 to-indigo-100',
+                text: theme === 'dark' ? 'text-gray-200' : 'text-gray-800',
+                header: theme === 'dark' ? 'bg-gray-900 border-gray-800' : 'bg-white',
+                panel: theme === 'dark' ? 'bg-gray-900 border-gray-800' : 'bg-white',
+                panelTitle: theme === 'dark' ? 'text-gray-100' : 'text-gray-700',
+                legendText: theme === 'dark' ? 'text-gray-200' : 'text-sm',
+                legendTitle: theme === 'dark' ? 'text-gray-100' : 'text-gray-700',
+                primaryBtn: theme === 'dark' ? 'bg-yellow-500 text-gray-900 hover:bg-yellow-400' : 'bg-indigo-500 text-white hover:bg-indigo-600',
+                secondaryBtn: theme === 'dark' ? 'bg-gray-700 text-gray-200 hover:bg-gray-600' : 'bg-gray-200 text-gray-700 hover:bg-gray-300',
+                input: theme === 'dark' ? 'bg-gray-800 border-gray-700 text-gray-100 focus:ring-yellow-500' : 'border-gray-300 focus:ring-indigo-400',
+                titleText: theme === 'dark' ? 'text-yellow-400' : 'text-indigo-800',
+            };
 
-                    <header className="flex flex-col sm:flex-row justify-between items-center mb-6 bg-white p-4 rounded-xl shadow-lg">
+            return (
+                <div className={`min-h-screen font-sans p-2 sm:p-4 lg:p-6 ${themeClasses.bg} ${themeClasses.text}`}>
+                    {employeeToDelete && <ConfirmationModal theme={theme} message={`Delete ${employeeToDelete.name}? This cannot be undone.`} onConfirm={() => handleDeleteEmployee(employeeToDelete.id)} onCancel={() => setEmployeeToDelete(null)} />}
+                    {departmentToDelete && <ConfirmationModal theme={theme} message={`Delete ${departmentToDelete.name} and ALL its employees? This is irreversible.`} onConfirm={() => handleDeleteDepartment(departmentToDelete.id)} onCancel={() => setDepartmentToDelete(null)} />}
+
+                    <header className={`flex flex-col sm:flex-row justify-between items-center mb-6 p-4 rounded-xl shadow-lg ${themeClasses.header}`}>
                         <div className="flex items-center space-x-3">
-                            <h1 className="text-2xl md:text-3xl font-bold text-indigo-800">NHD Travel Calendar</h1>
-                            <button onClick={() => setView(v => v === 'weekly' ? 'yearly' : 'weekly')} className="p-2 rounded-full text-indigo-600 hover:bg-indigo-100 transition" title={view === 'weekly' ? 'Switch to Yearly View' : 'Switch to Weekly View'}>
+                            <h1 className={`text-2xl md:text-3xl font-bold ${themeClasses.titleText}`}>NHD Travel Calendar</h1>
+                            <button onClick={() => setView(v => v === 'weekly' ? 'yearly' : 'weekly')} className={`p-2 rounded-full transition ${theme === 'dark' ? 'text-yellow-400 hover:bg-gray-800' : 'text-indigo-600 hover:bg-indigo-100'}`} title={view === 'weekly' ? 'Switch to Yearly View' : 'Switch to Weekly View'}>
                                 <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
                             </button>
                         </div>
                         {view === 'weekly' && (
                             <div className="flex items-center space-x-2 sm:space-x-4 mt-4 sm:mt-0">
-                                <button onClick={() => changeWeek(-1)} className="p-2 rounded-full bg-indigo-500 text-white hover:bg-indigo-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition shadow-md"><svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg></button>
+                                <button onClick={() => changeWeek(-1)} className={`p-2 rounded-full focus:outline-none focus:ring-2 transition shadow-md ${themeClasses.primaryBtn} ${theme === 'dark' ? 'focus:ring-yellow-500' : 'focus:ring-indigo-500'}`}><svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg></button>
                                 <div className="flex flex-col items-center">
-                                    <span className="text-lg md:text-xl font-semibold text-gray-900 text-center">{weekHeader}</span>
-                                    <button onClick={goToToday} className="mt-1 px-3 py-1 text-xs font-medium bg-gray-200 text-gray-700 rounded-full hover:bg-gray-300 transition">Go to Today</button>
+                                    <span className={`text-lg md:text-xl font-semibold text-center ${theme === 'dark' ? 'text-gray-100' : 'text-gray-900'}`}>{weekHeader}</span>
+                                    <button onClick={goToToday} className={`mt-1 px-3 py-1 text-xs font-medium rounded-full transition ${themeClasses.secondaryBtn}`}>Go to Today</button>
                                 </div>
-                                <button onClick={() => changeWeek(1)} className="p-2 rounded-full bg-indigo-500 text-white hover:bg-indigo-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition shadow-md"><svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg></button>
+                                <button onClick={() => changeWeek(1)} className={`p-2 rounded-full focus:outline-none focus:ring-2 transition shadow-md ${themeClasses.primaryBtn} ${theme === 'dark' ? 'focus:ring-yellow-500' : 'focus:ring-indigo-500'}`}><svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg></button>
                             </div>
                         )}
                     </header>
                     
                     {view === 'weekly' ? (
                         <WeeklyView 
+                            theme={theme}
+                            themeClasses={themeClasses}
                             isDateSelectorVisible={isDateSelectorVisible} setIsDateSelectorVisible={setIsDateSelectorVisible}
                             handleDateSelection={handleDateSelection} currentDate={currentDate}
                             departments={departments} employees={employees}
@@ -368,6 +416,8 @@
                         />
                     ) : (
                         <YearlyView 
+                            theme={theme}
+                            themeClasses={themeClasses}
                             year={yearlyViewYear} setYear={setYearlyViewYear}
                             departments={departments} employees={employees}
                             statuses={statuses}
@@ -376,32 +426,32 @@
                     
                     <div className="mt-6 flex flex-col md:flex-row gap-6 items-start">
                         {view === 'weekly' && (
-                            <div className="w-full md:w-1/2 bg-white p-4 sm:p-6 rounded-xl shadow-lg">
+                            <div className={`w-full md:w-1/2 p-4 sm:p-6 rounded-xl shadow-lg ${themeClasses.panel} border ${theme === 'dark' ? 'border-gray-800' : 'border-transparent'}`}>
                                 <div className="flex justify-between items-center cursor-pointer" onClick={() => setIsAddDeptVisible(!isAddDeptVisible)}>
-                                    <h2 className="text-lg font-semibold text-gray-700">Add New Department</h2>
-                                    <button className="p-1 rounded-full hover:bg-gray-200 transition">
-                                        <svg className={`w-6 h-6 text-gray-600 transform transition-transform duration-300 ${isAddDeptVisible ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" /></svg>
+                                    <h2 className={`text-lg font-semibold ${themeClasses.panelTitle}`}>Add New Department</h2>
+                                    <button className={`p-1 rounded-full transition ${theme === 'dark' ? 'hover:bg-gray-700' : 'hover:bg-gray-200'}`}>
+                                        <svg className={`w-6 h-6 text-gray-400 transform transition-transform duration-300 ${isAddDeptVisible ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" /></svg>
                                     </button>
                                 </div>
                                 <div className={`transition-all duration-500 ease-in-out overflow-hidden ${isAddDeptVisible ? 'max-h-96 mt-4' : 'max-h-0'}`}>
                                     <div className="flex flex-col sm:flex-row gap-3">
-                                        <input type="text" placeholder="Department Name" value={newDepartmentName} onChange={(e) => setNewDepartmentName(e.target.value)} className="flex-grow p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-400 outline-none transition" />
-                                        <button onClick={handleAddDepartment} className="px-6 py-3 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 transition shadow-md">Add Department</button>
+                                        <input type="text" placeholder="Department Name" value={newDepartmentName} onChange={(e) => setNewDepartmentName(e.target.value)} className={`flex-grow p-3 border rounded-lg outline-none transition ${themeClasses.input}`} />
+                                        <button onClick={handleAddDepartment} className={`px-6 py-3 font-semibold rounded-lg focus:outline-none focus:ring-2 transition shadow-md ${theme === 'dark' ? 'bg-yellow-500 text-gray-900 hover:bg-yellow-400 focus:ring-yellow-500' : 'bg-green-600 text-white hover:bg-green-700 focus:ring-green-500'}`}>Add Department</button>
                                     </div>
                                 </div>
                             </div>
                         )}
                         <div className={`w-full ${view === 'weekly' ? 'md:w-1/2' : 'md:w-full'}`}>
-                            <div className="bg-white p-4 rounded-xl shadow-lg">
-                                <h3 className="text-lg font-semibold text-gray-700 mb-3">Legend</h3>
+                            <div className={`p-4 rounded-xl shadow-lg ${themeClasses.panel} border ${theme === 'dark' ? 'border-gray-800' : 'border-transparent'}`}>
+                                <h3 className={`text-lg font-semibold mb-3 ${themeClasses.legendTitle}`}>Legend</h3>
                                 <div className="flex flex-col space-y-2">
                                     {LEGEND_ORDER.map(abbr => {
                                         const definition = LEGEND_DEFINITIONS[abbr];
-                                        const colorClass = abbr === 'WKND' ? 'bg-gray-200' : getStatusColorClass(abbr);
+                                        const colorClass = abbr === 'WKND' ? getStatusColorClass('WKND', theme) : getStatusColorClass(abbr, theme);
                                         return (
                                             <div key={abbr} className="flex items-center space-x-3">
-                                                <div className={`w-5 h-5 rounded-md flex-shrink-0 ${colorClass} border border-gray-300`}></div>
-                                                <span className="text-sm"><span className="font-bold">{abbr}</span>: {definition}</span>
+                                                <div className={`w-5 h-5 rounded-md flex-shrink-0 ${colorClass} border ${theme === 'dark' ? 'border-gray-700' : 'border-gray-300'}`}></div>
+                                                <span className={`${themeClasses.legendText}`}><span className={`font-bold ${theme === 'dark' ? 'text-gray-100' : ''}`}>{abbr}</span>: {definition}</span>
                                             </div>
                                         );
                                     })}
@@ -414,6 +464,7 @@
         }
 
         const WeeklyView = ({
+            theme, themeClasses,
             handleDateSelection, currentDate,
             departments, employees, editingDepartment, setEditingDepartment, handleUpdateDepartment,
             setDepartmentToDelete, newEmployeeInputs, setNewEmployeeInputs, handleAddEmployee,
@@ -421,41 +472,61 @@
             weekDays, statuses, handleStatusChange, handleDragStart, handleDragEnd,
             handleDragOver, handleDrop, draggingEmployeeId, dragOverEmployeeId, dragOverDeptId,
             isDateSelectorVisible, setIsDateSelectorVisible, setDragOverDeptId
-        }) => (
+        }) => {
+            const now = new Date();
+
+            return (
             <>
-                <div className="bg-white p-4 rounded-xl shadow-lg mb-6">
+                <div className={`p-4 rounded-xl shadow-lg mb-6 ${themeClasses.panel} border ${theme === 'dark' ? 'border-gray-800' : 'border-transparent'}`}>
                     <div className="flex justify-between items-center cursor-pointer" onClick={() => setIsDateSelectorVisible(!isDateSelectorVisible)}>
-                        <h2 className="text-lg font-semibold text-gray-700">Navigation</h2>
-                        <button className="p-1 rounded-full hover:bg-gray-200 transition">
-                            <svg className={`w-6 h-6 text-gray-600 transform transition-transform duration-300 ${isDateSelectorVisible ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" /></svg>
+                        <h2 className={`text-lg font-semibold ${themeClasses.panelTitle}`}>Navigation</h2>
+                        <button className={`p-1 rounded-full transition ${theme === 'dark' ? 'hover:bg-gray-700' : 'hover:bg-gray-200'}`}>
+                            <svg className={`w-6 h-6 text-gray-400 transform transition-transform duration-300 ${isDateSelectorVisible ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" /></svg>
                         </button>
                     </div>
                     <div className={`transition-all duration-500 ease-in-out overflow-hidden ${isDateSelectorVisible ? 'max-h-96 mt-4' : 'max-h-0'}`}>
                         <div className="flex justify-center flex-wrap gap-2 mb-4">
                             {YEARS.map(year => (
-                                <button key={year} onClick={() => handleDateSelection(year, currentDate.getMonth())} className={`px-4 py-2 text-sm font-semibold rounded-lg transition ${currentDate.getFullYear() === year ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}>{year}</button>
+                                <button key={year} onClick={() => handleDateSelection(year, currentDate.getMonth())} className={`px-4 py-2 text-sm font-semibold rounded-lg transition ${currentDate.getFullYear() === year ? (theme === 'dark' ? 'bg-yellow-500 text-gray-900' : 'bg-indigo-600 text-white') : themeClasses.secondaryBtn}`}>{year}</button>
                             ))}
                         </div>
                         <div className="flex justify-center flex-wrap gap-1">
-                            {MONTH_NAMES.map((month, index) => (
-                                <button key={month} onClick={() => handleDateSelection(currentDate.getFullYear(), index)} className={`px-3 py-1 text-xs font-medium rounded-lg transition ${currentDate.getMonth() === index ? 'bg-indigo-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>{month}</button>
-                            ))}
+                            {MONTH_NAMES.map((month, index) => {
+                                const isCurrent = currentDate.getMonth() === index;
+                                const isPast = currentDate.getFullYear() < now.getFullYear() || 
+                                             (currentDate.getFullYear() === now.getFullYear() && index < now.getMonth());
+
+                                let monthButtonClass = 'px-3 py-1 text-xs font-medium rounded-lg transition ';
+                                if (isCurrent) {
+                                    monthButtonClass += theme === 'dark' ? 'bg-yellow-400 text-gray-900' : 'bg-indigo-500 text-white';
+                                } else if (isPast) {
+                                    monthButtonClass += theme === 'dark' ? 'bg-gray-800 text-gray-500 hover:bg-gray-700' : 'bg-gray-100 text-gray-400 hover:bg-gray-200';
+                                } else {
+                                    monthButtonClass += theme === 'dark' ? 'bg-gray-700 text-gray-300 hover:bg-gray-600' : 'bg-gray-100 text-gray-600 hover:bg-gray-200';
+                                }
+                                
+                                return (
+                                    <button key={month} onClick={() => handleDateSelection(currentDate.getFullYear(), index)} className={monthButtonClass}>
+                                        {month}
+                                    </button>
+                                );
+                            })}
                         </div>
                     </div>
                 </div>
                 
-                <div className="overflow-x-auto bg-white rounded-xl shadow-lg p-1 sm:p-2">
+                <div className={`overflow-x-auto rounded-xl shadow-lg p-1 sm:p-2 ${themeClasses.panel} border ${theme === 'dark' ? 'border-gray-800' : 'border-transparent'}`}>
                     <table className="min-w-full border-collapse">
-                        <thead className="bg-gray-50">
+                        <thead className={theme === 'dark' ? 'bg-[#192131]' : 'bg-gray-50'}>
                             <tr>
-                                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sticky left-0 bg-gray-50 z-20 w-48 md:w-56">Department / Employee</th>
+                                <th className={`px-3 py-3 text-left text-xs font-medium uppercase tracking-wider sticky left-0 z-20 w-48 md:w-56 ${theme === 'dark' ? 'bg-[#192131] text-gray-300' : 'bg-gray-50 text-gray-500'}`}>Department / Employee</th>
                                 {weekDays.map(day => {
                                     const dayOfWeek = day.getDay();
                                     const isWeekend = dayOfWeek === 5 || dayOfWeek === 6;
                                     return (
-                                    <th key={day.toISOString()} className={`px-1 py-3 text-center text-xs font-medium uppercase tracking-wider w-24 ${isWeekend ? 'bg-gray-200 text-gray-600' : 'text-gray-500'}`}>
+                                    <th key={day.toISOString()} className={`px-1 py-3 text-center text-xs font-medium uppercase tracking-wider w-24 ${isWeekend ? (theme === 'dark' ? 'bg-gray-800 text-gray-400' : 'bg-gray-200 text-gray-600') : (theme === 'dark' ? 'bg-[#192131] text-gray-400' : 'text-gray-500')}`}>
                                         <div>{day.toLocaleString('en-US', { weekday: 'short' })}</div>
-                                        <div className="text-lg font-semibold">{day.getDate()}</div>
+                                        <div className={`text-lg font-semibold ${theme === 'dark' ? 'text-gray-100' : 'text-gray-900'}`}>{day.getDate()}</div>
                                     </th>
                                     );
                                 })}
@@ -464,37 +535,37 @@
                         {departments.map(dept => (
                             <tbody 
                                 key={dept.id}
-                                className={`divide-y divide-gray-200 transition-colors duration-300 ${dragOverDeptId === dept.id && draggingEmployeeId && employees.find(e=>e.id === draggingEmployeeId)?.departmentId !== dept.id ? 'bg-blue-100' : ''}`}
+                                className={`divide-y transition-colors duration-300 ${theme === 'dark' ? 'divide-gray-800' : 'divide-gray-200'} ${dragOverDeptId === dept.id && draggingEmployeeId && employees.find(e=>e.id === draggingEmployeeId)?.departmentId !== dept.id ? 'bg-yellow-900 bg-opacity-20' : ''}`}
                                 onDragEnter={(e) => { e.preventDefault(); setDragOverDeptId(dept.id); }}
                                 onDragLeave={(e) => { e.preventDefault(); setDragOverDeptId(null); }}
                                 onDragOver={(e) => e.preventDefault()}
                                 onDrop={(e) => handleDrop(e, dept.id, null)}
                             >
-                                <tr className="bg-indigo-50 group">
-                                    <td className="px-3 py-3 font-bold text-indigo-800 sticky left-0 bg-indigo-50 z-10 w-48 md:w-56 align-top">
+                                <tr className={`${theme === 'dark' ? 'bg-gray-900' : 'bg-indigo-50'} group`}>
+                                    <td className={`px-3 py-3 font-bold sticky left-0 z-10 w-48 md:w-56 align-top ${theme === 'dark' ? 'bg-gray-900 text-yellow-400' : 'bg-indigo-50 text-indigo-800'}`}>
                                         {editingDepartment.id === dept.id ? (
                                              <div className="flex flex-col gap-2">
-                                                <input type="text" value={editingDepartment.name} onChange={(e) => setEditingDepartment({...editingDepartment, name: e.target.value})} className="p-2 text-sm border border-indigo-300 rounded-md focus:ring-1 focus:ring-indigo-400 outline-none" autoFocus />
+                                                <input type="text" value={editingDepartment.name} onChange={(e) => setEditingDepartment({...editingDepartment, name: e.target.value})} className={`p-2 text-sm border rounded-md focus:ring-1 outline-none ${theme === 'dark' ? 'bg-gray-700 border-yellow-500 focus:ring-yellow-400 text-gray-200' : 'border-indigo-300 focus:ring-indigo-400'}`} autoFocus />
                                                 <div className="flex gap-2">
-                                                    <button onClick={handleUpdateDepartment} className="px-3 py-1 bg-green-500 text-white text-xs font-semibold rounded-md hover:bg-green-600 transition shadow-sm">Save</button>
-                                                    <button onClick={() => setEditingDepartment({id: null, name: ''})} className="px-3 py-1 bg-gray-200 text-gray-700 text-xs font-semibold rounded-md hover:bg-gray-300 transition">Cancel</button>
+                                                    <button onClick={handleUpdateDepartment} className="px-3 py-1 bg-green-600 text-white text-xs font-semibold rounded-md hover:bg-green-500 transition shadow-sm">Save</button>
+                                                    <button onClick={() => setEditingDepartment({id: null, name: ''})} className={`px-3 py-1 text-xs font-semibold rounded-md transition ${theme === 'dark' ? 'bg-gray-600 text-gray-200 hover:bg-gray-500' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}>Cancel</button>
                                                 </div>
                                             </div>
                                         ) : (
                                             <div className="flex justify-between items-start">
                                                 <div className="text-base break-words pr-2">{dept.name}</div>
                                                 <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
-                                                    <button onClick={() => setEditingDepartment({ id: dept.id, name: dept.name })} className="p-1 text-blue-600 hover:text-blue-800 hover:bg-blue-100 rounded-full"><svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M17.414 2.586a2 2 0 00-2.828 0L7 10.172V13h2.828l7.586-7.586a2 2 0 000-2.828z"></path><path fillRule="evenodd" d="M2 6a2 2 0 012-2h4a1 1 0 010 2H4v10h10v-4a1 1 0 112 0v4a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" clipRule="evenodd"></path></svg></button>
-                                                    <button onClick={() => setDepartmentToDelete(dept)} className="p-1 text-red-500 hover:text-red-700 hover:bg-red-100 rounded-full"><svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd"></path></svg></button>
+                                                    <button onClick={() => setEditingDepartment({ id: dept.id, name: dept.name })} className={`p-1 rounded-full ${theme === 'dark' ? 'text-yellow-400 hover:text-yellow-300 hover:bg-gray-700' : 'text-blue-600 hover:text-blue-800 hover:bg-blue-100'}`}><svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M17.414 2.586a2 2 0 00-2.828 0L7 10.172V13h2.828l7.586-7.586a2 2 0 000-2.828z"></path><path fillRule="evenodd" d="M2 6a2 2 0 012-2h4a1 1 0 010 2H4v10h10v-4a1 1 0 112 0v4a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" clipRule="evenodd"></path></svg></button>
+                                                    <button onClick={() => setDepartmentToDelete(dept)} className={`p-1 rounded-full ${theme === 'dark' ? 'text-red-500 hover:text-red-400 hover:bg-gray-700' : 'text-red-500 hover:text-red-700 hover:bg-red-100'}`}><svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd"></path></svg></button>
                                                 </div>
                                             </div>
                                         )}
                                         <div className="flex items-center mt-2 gap-2">
-                                            <input type="text" placeholder="New Employee..." value={newEmployeeInputs[dept.id] || ''} onChange={(e) => setNewEmployeeInputs(prev => ({ ...prev, [dept.id]: e.target.value }))} className="flex-grow p-2 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-indigo-400 outline-none" />
-                                            <button onClick={() => handleAddEmployee(dept.id)} className="px-3 py-2 bg-blue-500 text-white text-xs font-semibold rounded-md hover:bg-blue-600 transition shadow-sm">ADD</button>
+                                            <input type="text" placeholder="New Employee..." value={newEmployeeInputs[dept.id] || ''} onChange={(e) => setNewEmployeeInputs(prev => ({ ...prev, [dept.id]: e.target.value }))} className={`flex-grow p-2 text-sm border rounded-md focus:ring-1 outline-none ${themeClasses.input}`} />
+                                            <button onClick={() => handleAddEmployee(dept.id)} className={`px-3 py-2 text-xs font-semibold rounded-md transition shadow-sm ${theme === 'dark' ? 'bg-yellow-500 text-gray-900 hover:bg-yellow-400' : 'bg-blue-500 text-white hover:bg-blue-600'}`}>ADD</button>
                                         </div>
                                     </td>
-                                    <td colSpan={weekDays.length} className="bg-indigo-50"></td>
+                                    <td colSpan={weekDays.length} className={`${theme === 'dark' ? 'bg-gray-900 border-b border-gray-700' : 'bg-indigo-50'}`}></td>
                                 </tr>
                                 {employees.filter(emp => emp.departmentId === dept.id).map((emp) => (
                                     <tr 
@@ -504,22 +575,22 @@
                                         onDragEnd={handleDragEnd}
                                         onDragOver={(e) => handleDragOver(e, emp.id)}
                                         onDrop={(e) => handleDrop(e, dept.id, emp.id)}
-                                        className={`hover:bg-gray-50 group cursor-grab ${draggingEmployeeId === emp.id ? 'opacity-50 bg-gray-200' : ''}`}
+                                        className={`group cursor-grab ${theme === 'dark' ? 'hover:bg-gray-700' : 'hover:bg-gray-50'} ${draggingEmployeeId === emp.id ? 'opacity-50 bg-gray-600' : ''}`}
                                     >
-                                        <td className={`px-3 py-0 text-sm font-medium text-gray-800 sticky left-0 bg-white group-hover:bg-gray-50 z-10 w-48 md:w-56`}>
-                                            <div className={`h-full flex justify-between items-center border-t-2 ${dragOverEmployeeId === emp.id ? 'border-blue-500' : 'border-transparent'}`}>
+                                        <td className={`px-3 py-0 text-sm font-medium sticky left-0 z-10 w-48 md:w-56 ${theme === 'dark' ? 'bg-gray-900 group-hover:bg-gray-700 text-gray-200' : 'bg-white group-hover:bg-gray-50 text-gray-800'}`}>
+                                            <div className={`h-full flex justify-between items-center border-t-2 ${dragOverEmployeeId === emp.id ? 'border-yellow-600' : 'border-transparent'}`}>
                                                 {editingEmployee.id === emp.id ? (
                                                     <div className="flex items-center gap-2 w-full py-2">
-                                                        <input type="text" value={editingEmployee.name} onChange={(e) => setEditingEmployee({...editingEmployee, name: e.target.value})} className="flex-grow p-1 text-sm border border-indigo-300 rounded-md focus:ring-1 focus:ring-indigo-400 outline-none" autoFocus />
-                                                        <button onClick={handleUpdateEmployee} className="p-1 text-green-600 hover:bg-green-100 rounded-full"><svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"></path></svg></button>
-                                                        <button onClick={() => setEditingEmployee({id: null, name: ''})} className="p-1 text-red-600 hover:bg-red-100 rounded-full"><svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.697a1 1 0 010-1.414z" clipRule="evenodd"></path></svg></button>
+                                                        <input type="text" value={editingEmployee.name} onChange={(e) => setEditingEmployee({...editingEmployee, name: e.target.value})} className={`flex-grow p-1 text-sm border rounded-md focus:ring-1 outline-none ${theme === 'dark' ? 'bg-gray-700 border-yellow-600 focus:ring-yellow-400 text-gray-200' : 'border-indigo-300 focus:ring-indigo-400'}`} autoFocus />
+                                                        <button onClick={handleUpdateEmployee} className={`p-1 rounded-full ${theme === 'dark' ? 'text-green-500 hover:bg-gray-700' : 'text-green-600 hover:bg-green-100'}`}><svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"></path></svg></button>
+                                                        <button onClick={() => setEditingEmployee({id: null, name: ''})} className={`p-1 rounded-full ${theme === 'dark' ? 'text-red-500 hover:bg-gray-700' : 'text-red-600 hover:bg-red-100'}`}><svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.697a1 1 0 010-1.414z" clipRule="evenodd"></path></svg></button>
                                                     </div>
                                                 ) : (
                                                     <div className="flex justify-between items-center w-full py-2">
                                                         <span className="break-words pr-2">{emp.name}</span>
                                                         <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
-                                                            <button onClick={() => setEditingEmployee({ id: emp.id, name: emp.name })} className="p-1 text-blue-600 hover:text-blue-800 hover:bg-blue-100 rounded-full"><svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M17.414 2.586a2 2 0 00-2.828 0L7 10.172V13h2.828l7.586-7.586a2 2 0 000-2.828z"></path><path fillRule="evenodd" d="M2 6a2 2 0 012-2h4a1 1 0 010 2H4v10h10v-4a1 1 0 112 0v4a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" clipRule="evenodd"></path></svg></button>
-                                                            <button onClick={() => setEmployeeToDelete(emp)} className="p-1 text-red-500 hover:text-red-700 hover:bg-red-100 rounded-full"><svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd"></path></svg></button>
+                                                            <button onClick={() => setEditingEmployee({ id: emp.id, name: emp.name })} className={`p-1 rounded-full ${theme === 'dark' ? 'text-yellow-400 hover:text-yellow-300 hover:bg-gray-700' : 'text-blue-600 hover:text-blue-800 hover:bg-blue-100'}`}><svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M17.414 2.586a2 2 0 00-2.828 0L7 10.172V13h2.828l7.586-7.586a2 2 0 000-2.828z"></path><path fillRule="evenodd" d="M2 6a2 2 0 012-2h4a1 1 0 010 2H4v10h10v-4a1 1 0 112 0v4a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" clipRule="evenodd"></path></svg></button>
+                                                            <button onClick={() => setEmployeeToDelete(emp)} className={`p-1 rounded-full ${theme === 'dark' ? 'text-red-500 hover:text-red-400 hover:bg-gray-700' : 'text-red-500 hover:text-red-700 hover:bg-red-100'}`}><svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd"></path></svg></button>
                                                         </div>
                                                     </div>
                                                 )}
@@ -531,19 +602,19 @@
 
                                             if (isWeekend) {
                                                 return (
-                                                    <td key={day.toISOString()} className="px-1 py-1 whitespace-nowrap text-sm text-center bg-gray-200">
-                                                        <div className="p-1 text-gray-500 font-medium rounded-md text-xs">WKND</div>
+                                                    <td key={day.toISOString()} className={`px-1 py-1 whitespace-nowrap text-sm text-center ${theme === 'dark' ? 'bg-gray-700' : 'bg-gray-200'}`}>
+                                                        <div className={`p-1 font-medium rounded-md text-xs ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>WKND</div>
                                                     </td>
                                                 );
                                             }
                                             
                                             const key = `${emp.id}-${day.getFullYear()}-${day.getMonth()}-${day.getDate()}`;
                                             const status = statuses[key] || "NEOM";
-                                            const statusColorClass = getStatusColorClass(status);
+                                            const statusColorClass = getStatusColorClass(status, theme);
                                             return (
                                                 <td key={day.toISOString()} className="px-1 py-1 whitespace-nowrap text-sm text-center">
-                                                    <select value={status} onChange={(e) => handleStatusChange(emp.id, day, e.target.value)} className={`block w-full p-1 border-gray-200 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm hover:border-gray-400 transition-colors duration-200 ${statusColorClass}`}>
-                                                        {STATUS_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                                                    <select value={status} onChange={(e) => handleStatusChange(emp.id, day, e.target.value)} className={`block w-full p-1 rounded-md shadow-sm focus:ring-yellow-500 focus:border-yellow-500 sm:text-sm hover:border-gray-500 transition-colors duration-200 ${statusColorClass} ${theme === 'dark' ? 'border-transparent text-gray-800' : 'border-gray-200 text-gray-800'}`}>
+                                                        {STATUS_OPTIONS.map(opt => <option key={opt} value={opt} className={theme === 'dark' ? 'bg-gray-800 text-gray-200' : ''}>{opt}</option>)}
                                                     </select>
                                                 </td>
                                             );
@@ -555,9 +626,10 @@
                     </table>
                 </div>
             </>
-        );
+        )
+        };
 
-        const YearlyView = ({ year, setYear, departments, employees, statuses }) => {
+        const YearlyView = ({ year, setYear, departments, employees, statuses, theme }) => {
             const tableContainerRef = React.useRef(null);
             const daysInYear = (y) => (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0 ? 366 : 365;
             const days = Array.from({ length: daysInYear(year) }, (_, i) => new Date(year, 0, i + 1));
@@ -587,37 +659,37 @@
             };
             
             return (
-                <div className="bg-white p-4 rounded-xl shadow-lg">
+                <div className={`p-4 rounded-xl shadow-lg ${theme === 'dark' ? 'bg-gray-900 border border-gray-800' : 'bg-white'}`}>
                     <div className="flex justify-center items-center mb-4 space-x-4">
-                        <h2 className="text-xl font-semibold">Yearly Overview</h2>
+                        <h2 className={`text-xl font-semibold ${theme === 'dark' ? 'text-gray-100' : 'text-gray-900'}`}>Yearly Overview</h2>
                         <div className="flex space-x-2">
                             {YEARS.map(y => (
-                                <button key={y} onClick={() => setYear(y)} className={`px-4 py-2 text-sm font-semibold rounded-lg transition ${year === y ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}>{y}</button>
+                                <button key={y} onClick={() => setYear(y)} className={`px-4 py-2 text-sm font-semibold rounded-lg transition ${year === y ? (theme === 'dark' ? 'bg-yellow-500 text-gray-900' : 'bg-indigo-600 text-white') : (theme === 'dark' ? 'bg-gray-700 text-gray-200 hover:bg-gray-600' : 'bg-gray-200 text-gray-700 hover:bg-gray-300')}`}>{y}</button>
                             ))}
                         </div>
-                        <button onClick={jumpToCurrentMonth} className="px-3 py-1 text-xs font-medium bg-gray-200 text-gray-700 rounded-full hover:bg-gray-300 transition">Go to this Month</button>
+                        <button onClick={jumpToCurrentMonth} className={`px-3 py-1 text-xs font-medium rounded-full transition ${theme === 'dark' ? 'bg-gray-700 text-gray-200 hover:bg-gray-600' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}>Go to this Month</button>
                     </div>
                     <div className="overflow-x-auto" ref={tableContainerRef}>
                         <table className="min-w-full border-collapse">
                             <thead>
                                 <tr>
-                                    <th className="sticky left-0 bg-white p-2 text-xs font-medium text-gray-500 uppercase z-10 w-48">Department / Employee</th>
+                                    <th className={`sticky left-0 p-2 text-xs font-medium uppercase z-10 w-48 ${theme === 'dark' ? 'bg-gray-900 text-gray-300' : 'bg-white text-gray-500'}`}>Department / Employee</th>
                                     {MONTH_NAMES.map((monthName, index) => {
                                         const daysInMonth = new Date(year, index + 1, 0).getDate();
-                                        return <th key={monthName} colSpan={daysInMonth} data-month-id={`month-${index}`} className="p-1 text-left pl-2 text-xs font-medium text-gray-500 uppercase">{monthName}</th>
+                                        return <th key={monthName} colSpan={daysInMonth} data-month-id={`month-${index}`} className={`p-1 text-left pl-2 text-xs font-medium uppercase ${theme === 'dark' ? 'text-gray-300' : 'text-gray-500'}`}>{monthName}</th>
                                     })}
                                 </tr>
                             </thead>
                             <tbody>
                                 {departments.map(dept => (
                                     <React.Fragment key={dept.id}>
-                                        <tr className="bg-indigo-50">
-                                            <td className="sticky left-0 bg-indigo-50 p-2 font-bold text-indigo-800 text-sm z-10 w-48">{dept.name}</td>
-                                            <td colSpan={daysInYear(year)} className="bg-indigo-50"></td>
+                                        <tr className={theme === 'dark' ? 'bg-gray-800' : 'bg-indigo-50'}>
+                                            <td className={`sticky left-0 p-2 font-bold text-sm z-10 w-48 ${theme === 'dark' ? 'bg-gray-800 text-yellow-400' : 'bg-indigo-50 text-indigo-800'}`}>{dept.name}</td>
+                                            <td colSpan={daysInYear(year)} className={theme === 'dark' ? 'bg-gray-800' : 'bg-indigo-50'}></td>
                                         </tr>
                                         {employees.filter(emp => emp.departmentId === dept.id).map((emp, empIndex) => (
-                                            <tr key={emp.id} className={empIndex % 2 === 0 ? 'bg-gray-50' : ''}>
-                                                <td className={`sticky left-0 p-2 text-sm font-medium text-gray-800 z-10 w-48 ${empIndex % 2 === 0 ? 'bg-gray-50' : 'bg-white'}`}>{emp.name}</td>
+                                            <tr key={emp.id} className={theme === 'dark' ? (empIndex % 2 === 0 ? 'bg-gray-900' : 'bg-black') : (empIndex % 2 === 0 ? 'bg-gray-50' : 'bg-white')}>
+                                                <td className={`sticky left-0 p-2 text-sm font-medium z-10 w-48 ${theme === 'dark' ? (empIndex % 2 === 0 ? 'bg-gray-900 text-gray-100' : 'bg-black text-gray-100') : (empIndex % 2 === 0 ? 'bg-gray-50 text-gray-800' : 'bg-white text-gray-800')}`}>{emp.name}</td>
                                                 {days.map(day => {
                                                     const dayOfWeek = day.getDay();
                                                     const isWeekend = dayOfWeek === 5 || dayOfWeek === 6;
@@ -629,7 +701,7 @@
                                                     const isCurrentWeek = day >= startOfCurrentWeek && day <= endOfCurrentWeek;
                                                     let borderClass = '';
                                                     if(isCurrentWeek) {
-                                                        borderClass = 'border-t border-b border-blue-300';
+                                                        borderClass = `border-t border-b ${theme === 'dark' ? 'border-yellow-600' : 'border-blue-300'}`;
                                                         if(dayOfWeek === 0) borderClass += ' border-l';
                                                         if(dayOfWeek === 6) borderClass += ' border-r';
                                                     }
@@ -638,7 +710,7 @@
                                                     
                                                     return (
                                                         <td key={day.toISOString()} className={`p-1 relative ${cellClass} ${borderClass}`}>
-                                                            <div className={`w-4 h-4 day-square ${getStatusColorClass(finalStatus)}`}></div>
+                                                            <div className={`w-4 h-4 day-square ${getStatusColorClass(finalStatus, theme)}`}></div>
                                                             <div className="tooltip">{`${day.toLocaleDateString()}: ${finalStatus}`}</div>
                                                         </td>
                                                     );
@@ -660,3 +732,4 @@
     </script>
 </body>
 </html>
+
